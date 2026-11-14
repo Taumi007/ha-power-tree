@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Stromnetz einrichten",
+        "description": "Legt ein leeres Stromnetz an. Kästen, Sicherungen und Zähler pflegst du danach im Panel »Stromnetz«."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Stromnetz ist bereits eingerichtet."
+    }
+  }
+}

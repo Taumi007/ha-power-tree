@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stromnetz Testumgebung</title>
+<style>
+  :root {
+    --primary-background-color: #111111; --card-background-color: #1c1c1c; --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b; --divider-color: rgba(225,225,225,.12); --primary-color: #4682b4;
+    --disabled-text-color: #6f6f6f; --error-color: #ef5350; --app-header-background-color: #1c1c1c;
+  }
+  :root.light {
+    --primary-background-color: #fafafa; --card-background-color: #ffffff; --primary-text-color: #212121;
+    --secondary-text-color: #727272; --divider-color: rgba(0,0,0,.12); --app-header-background-color: #ffffff;
+  }
+  html, body { margin: 0; height: 100%; background: var(--primary-background-color); }
+  stromnetz-panel { display: flex; height: 100vh; }
+</style>
+</head>
+<body>
+<stromnetz-panel></stromnetz-panel>
+<script type="module">
+  if (location.hash === "#light") document.documentElement.classList.add("light");
+  const [desc, states] = await Promise.all([fetch(new URLSearchParams(location.search).get("desc") ?? "desc.json").then((r) => r.json()), fetch("states.json").then((r) => r.json())]);
+  for (const [k, v] of Object.entries(states)) v.entity_id = k;
+  window.calls = [];
+  const hass = {
+    states,
+    callWS: async (msg) => {
+      window.calls.push(msg);
+      if (msg.type === "stromnetz/get") return structuredClone(desc);
+      if (msg.type === "stromnetz/validate") return { ...structuredClone(desc), data: msg.data };
+      if (msg.type === "stromnetz/save") return { saved: true, ...structuredClone(desc), data: msg.data };
+      if (msg.type === "stromnetz/export_yaml") return { yaml: "# Export\n" };
+      if (msg.type === "stromnetz/import_yaml") return { data: structuredClone(desc.data), notes: [] };
+      throw new Error("unbekannt " + msg.type);
+    },
+    callService: (d, s, data) => window.calls.push({ d, s, data }),
+  };
+  await import("../../custom_components/stromnetz/frontend/stromnetz-panel.js");
+  const el = document.querySelector("stromnetz-panel");
+  el.hass = hass;
+  window.panel = el;
+  // Live-Werte simulieren
+  setInterval(() => {
+    const s = { ...hass.states };
+    for (const k of Object.keys(s)) if (k.startsWith("sensor.") && s[k].state !== "unknown") s[k] = { ...s[k], state: String(Math.max(0, parseFloat(s[k].state) * (0.95 + Math.random() * 0.1)).toFixed(1)) };
+    hass.states = s;
+    el.hass = { ...hass };
+  }, 3000);
+</script>
+</body>
+</html>

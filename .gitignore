@@ -1,0 +1,5 @@
+__pycache__/
+tests/imported.json
+.DS_Store
+tests/harness/live-desc.json
+backups/

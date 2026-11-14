@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Stromnetz",
+        "description": "Creates an empty grid. Add cabinets, breakers and meters afterwards in the Stromnetz panel."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Stromnetz is already set up."
+    }
+  }
+}
