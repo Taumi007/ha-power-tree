@@ -1,0 +1,81 @@
+{
+ "devices": [
+  {
+   "device_id": "0000example0000pro4pm00000000001",
+   "name": "Modul K1",
+   "model": "Shelly Pro 4PM",
+   "model_id": "SPSW-104PE16EU",
+   "area_id": "flur",
+   "channels": [
+    {
+     "index": 0,
+     "name": "Gartenpumpe",
+     "kind": "relay",
+     "switch": "switch.modul_k1_gartenpumpe",
+     "power": "sensor.modul_k1_gartenpumpe_leistung"
+    },
+    {
+     "index": 1,
+     "name": "Gartenbeleuchtung",
+     "kind": "relay",
+     "switch": "switch.modul_k1_gartenbeleuchtung",
+     "power": "sensor.modul_k1_gartenbeleuchtung_leistung"
+    },
+    {
+     "index": 2,
+     "name": "Markise",
+     "kind": "relay",
+     "switch": "switch.modul_k1_markise",
+     "power": "sensor.modul_k1_markise_leistung"
+    },
+    {
+     "index": 3,
+     "name": "Reserve",
+     "kind": "relay",
+     "switch": "switch.modul_k1_reserve",
+     "power": "sensor.modul_k1_reserve_leistung"
+    }
+   ]
+  },
+  {
+   "device_id": "0000example0000plugs00000000002",
+   "name": "Steckdose TV",
+   "model": "Shelly Plug S",
+   "model_id": "SNPL-00112EU",
+   "area_id": "wohnzimmer",
+   "channels": [
+    {
+     "index": 0,
+     "name": "Steckdose TV",
+     "kind": "relay",
+     "switch": "switch.wohnzimmer_steckdose_tv",
+     "power": "sensor.wohnzimmer_steckdose_tv_leistung"
+    }
+   ]
+  },
+  {
+   "device_id": "0000example0000pmmini0000000003",
+   "name": "Deckenleuchte",
+   "model": "Shelly PM Mini Gen3",
+   "model_id": "S3PM-001PCEU16",
+   "area_id": "flur",
+   "channels": [
+    {
+     "index": 0,
+     "name": "Deckenleuchte",
+     "kind": "meter",
+     "switch": null,
+     "power": "sensor.flur_deckenleuchte_leistung"
+    }
+   ]
+  }
+ ],
+ "discovered": [
+  {
+   "flow_id": "x1",
+   "name": "shellyplus1pm-000000",
+   "host": "192.0.2.10",
+   "source": "zeroconf"
+  }
+ ]
+}

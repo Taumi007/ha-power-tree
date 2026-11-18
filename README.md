@@ -26,5 +26,5 @@ Buchstaben der Abgänge: X = Steckdose, A = Abzweig, E = Festanschluss, G = Ger�
 Hutschienengeräte mit mehreren Kanälen (Shelly Pro 4PM, 3-poliger LS) haben pro Kanal einen eigenen Knoten, z. B. `HV-K1.3` oder `HV-KF.L2`.
 
 ## Entwicklung
-- `uv run tests/gen_desc.py` erzeugt Testdaten. Danach `python3 -m http.server` starten und `tests/harness/index.html` öffnen, um das Panel mit nachgebautem `hass` zu testen.
+- `uv run tests/gen_desc.py` erzeugt aus dem erfundenen Beispielhaus (`tests/example_house.py`) die Testdaten. Danach `python3 -m http.server` im Repo starten und `tests/harness/index.html` öffnen, um das Panel mit nachgebautem `hass` zu testen.
 - `scripts/deploy.sh` kopiert die Integration nach `/Volumes/config/custom_components/stromnetz`. Änderungen am Python-Code brauchen danach einen HA-Neustart, Änderungen an den Panel-Dateien nur ein Neuladen der Seite.

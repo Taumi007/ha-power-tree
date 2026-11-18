@@ -2,7 +2,8 @@
 # requires-python = ">=3.12"
 # dependencies = ["pyyaml"]
 # ///
-"""Erzeugt Mock-Daten für tests/harness: desc.json (wie stromnetz/get) und states.json."""
+"""Erzeugt Mock-Daten für tests/harness aus dem Beispielhaus: desc.json (wie stromnetz/get),
+states.json und shelly.json."""
 import importlib.util, json, random, sys, types
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1] / "custom_components" / "stromnetz"
@@ -12,9 +13,10 @@ for name in ("model",):
     mod = importlib.util.module_from_spec(spec); sys.modules[f"sn.{name}"] = mod; spec.loader.exec_module(mod)
 from sn.model import Netz
 here = Path(__file__).parent
-data = json.loads((here / "imported.json").read_text())
-areas = json.loads((here / "areas.json").read_text())
-floors = {"keller": "Keller", "erdgeschoss": "Erdgeschoss", "obergeschoss": "Obergeschoss", "dachboden": "Dachboden", "aussenbereich": "Außenbereich", "gerate": "Geräte"}
+sys.path.insert(0, str(here))
+import example_house  # erfundenes Beispielhaus, keine echten Daten
+data, areas, floors = example_house.build(), example_house.AREAS, example_house.FLOORS
+(here / "harness" / "shelly.json").write_text(json.dumps(example_house.shelly(), ensure_ascii=False, indent=1))
 netz = Netz(data, areas, floors)
 defs = netz.sensors()
 random.seed(1)
@@ -42,7 +44,9 @@ for d in defs:
     elif d.role == "gruppe" or d.attrs.get("gruppe"):
         groups.append({"entity_id": eid, "name": d.name, **{k: v for k, v in d.attrs.items() if k in ("gruppe", "raum", "stockwerk", "phase", "kasten")}})
     else: sensors.setdefault(f"grid:{d.attrs.get('phase')}", {})[d.role] = eid
-states["switch.test_relais"] = {"state": "on", "attributes": {"friendly_name": "Test Relais"}}
+for n in netz.nodes.values():
+    if n["switch"]:
+        states[n["switch"]] = {"state": "on", "attributes": {"friendly_name": n["name"] or n["switch"]}}
 desc = {"data": netz.data, "addresses": netz.addresses, "errors": netz.errors, "warnings": netz.warnings, "sensors": sensors, "groups": groups, "areas": areas, "floors": floors}
 (here / "harness" / "desc.json").write_text(json.dumps(desc, ensure_ascii=False))
 (here / "harness" / "states.json").write_text(json.dumps(states, ensure_ascii=False))
