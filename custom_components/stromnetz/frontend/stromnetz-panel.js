@@ -4,7 +4,7 @@ import { Editor } from "./editor.js";
 import { FlowView } from "./flow.js";
 import { Net } from "./net.js";
 import { STYLE } from "./style.js";
-import { CATALOG, CATALOG_BY_KEY, itemWidth, ratingColor } from "./catalog.js";
+import { CATALOG, CATALOG_BY_KEY, catalogForDevice, dinVariant, itemWidth, ratingColor } from "./catalog.js";
 import { roomSankey } from "./sankey.js";
 import { GRID, KIND_LABEL, MDI, PHASES, PHASE_LABEL, clone, debounce, fireMoreInfo, fmtW, h, icon, newId, num, slug } from "./util.js";
 
@@ -29,6 +29,26 @@ class StromnetzPanel extends HTMLElement {
     window.addEventListener("beforeunload", (e) => {
       if (this.dirty) e.preventDefault();
     });
+  }
+
+  // Höhe = sichtbarer Bereich ab der Oberkante des Panels (iOS: Safe Areas, Browserleisten, Companion-App)
+  connectedCallback() {
+    this._fitHeight = () => {
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      const top = Math.max(0, this.getBoundingClientRect().top);
+      this.style.height = `${Math.max(240, Math.floor(vh - top))}px`;
+    };
+    this._fitHeight();
+    requestAnimationFrame(this._fitHeight);
+    window.addEventListener("resize", this._fitHeight);
+    window.visualViewport?.addEventListener("resize", this._fitHeight);
+    window.addEventListener("orientationchange", this._fitHeight);
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("resize", this._fitHeight);
+    window.visualViewport?.removeEventListener("resize", this._fitHeight);
+    window.removeEventListener("orientationchange", this._fitHeight);
   }
 
   set hass(hass) {
@@ -86,11 +106,17 @@ class StromnetzPanel extends HTMLElement {
     }
   }
 
-  changed({ layoutOnly = false } = {}) {
+  changed({ layoutOnly = false, deferred = false } = {}) {
     this.dirty = true;
     this.net = new Net(this.data, this.desc);
-    this.renderView();
-    this.renderStatus();
+    if (deferred) {
+      // Aus Formularfeldern: erst nach dem Fokuswechsel neu zeichnen, damit das angeklickte Feld erhalten bleibt
+      clearTimeout(this._deferT);
+      this._deferT = setTimeout(() => { this.renderView(); this.renderStatus(); }, 0);
+    } else {
+      this.renderView();
+      this.renderStatus();
+    }
     if (!layoutOnly) this.validate();
   }
 
@@ -138,10 +164,22 @@ class StromnetzPanel extends HTMLElement {
     this.shadowRoot.replaceChildren();
     const style = h("style", {}, STYLE);
     this.search = h("input", { type: "search", placeholder: "Knoten oder Adresse suchen", list: "sn-search", "aria-label": "Knoten suchen" });
-    this.search.addEventListener("change", () => this.doSearch(this.search.value));
-    this.saveBtn = h("button", { class: "btn primary", onclick: () => this.save() }, "Speichern");
-    this.discardBtn = h("button", { class: "btn", onclick: () => this.discard() }, "Verwerfen");
-    this.editBtn = h("button", { class: "btn", onclick: () => { this.editing = !this.editing; this.renderStatus(); this.renderView(); } });
+    this.search.addEventListener("change", () => { this.doSearch(this.search.value); this.header?.classList.remove("searching"); });
+    // Auf dem Handy nur Symbole (Beschriftung per CSS ausgeblendet)
+    this.saveBtn = h("button", { class: "btn primary ib", title: "Speichern", "aria-label": "Speichern", onclick: () => this.save() },
+      icon("M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z", 18), h("span", { class: "bl" }, "Speichern"));
+    this.discardBtn = h("button", { class: "btn ib", title: "Verwerfen", "aria-label": "Verwerfen", onclick: () => this.discard() },
+      icon("M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 20.1,16L22.47,15.22C21.08,11.03 17.15,8 12.5,8Z", 18), h("span", { class: "bl" }, "Verwerfen"));
+    this.editLabel = h("span", { class: "bl" });
+    this.editBtn = h("button", { class: "btn ib", onclick: () => { this.editing = !this.editing; this.renderStatus(); this.renderView(); } },
+      icon(MDI.pencil, 18), this.editLabel);
+    // Tabs auf dem Handy als Auswahlliste, Suche hinter einem Knopf
+    this.tabSelect = h("select", { class: "tab-select", "aria-label": "Ansicht" });
+    this.tabSelect.addEventListener("change", () => { this.tab = this.tabSelect.value; this.render(); });
+    this.searchBtn = h("button", { class: "icon-btn search-btn", "aria-label": "Suchen", onclick: () => {
+      this.header.classList.toggle("searching");
+      if (this.header.classList.contains("searching")) this.search.focus();
+    } }, icon("M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"));
     this.status = h("span", { class: "status" });
     this.tabsEl = h("nav", { class: "tabs" });
     this.banner = h("div", { class: "banner" });
@@ -152,11 +190,13 @@ class StromnetzPanel extends HTMLElement {
     this.pickerEl = h("div", { class: "picker", onclick: () => this.closePicker() });
     const menuBtn = h("button", { class: "icon-btn menu-btn", "aria-label": "Seitenleiste", onclick: () => this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true })) },
       icon("M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"));
-    const header = h("header", {},
+    const header = this.header = h("header", {},
       menuBtn,
       h("div", { class: "brand" }, icon("M11 15H6L13 1V9H18L11 23V15Z", 22), h("span", {}, "Stromnetz")),
       this.tabsEl,
+      this.tabSelect,
       h("div", { class: "grow" }),
+      this.searchBtn,
       h("label", { class: "search" }, icon("M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z", 16), this.search),
       this.status, this.editBtn, this.discardBtn, this.saveBtn);
     this.shadowRoot.append(style, header, this.banner, this.main, this.menuEl, this.pickerEl, this.toastEl, this.lists);
@@ -176,6 +216,7 @@ class StromnetzPanel extends HTMLElement {
     this.tabsEl.replaceChildren(...TABS.map(([k, l]) => h("button", {
       class: `tab${this.tab === k ? " active" : ""}`, onclick: () => { this.tab = k; this.render(); },
     }, l)));
+    this.tabSelect.replaceChildren(...TABS.map(([k, l]) => h("option", { value: k, selected: this.tab === k }, l)));
     this.renderStatus();
     this.renderView();
   }
@@ -184,21 +225,31 @@ class StromnetzPanel extends HTMLElement {
     if (!this.saveBtn) return;
     this.saveBtn.disabled = !this.dirty;
     this.discardBtn.hidden = !this.dirty;
-    this.editBtn.textContent = this.editing ? "Bearbeiten: an" : "Bearbeiten: aus";
+    this.editLabel.textContent = this.editing ? "Bearbeiten: an" : "Bearbeiten: aus";
+    this.editBtn.title = this.editBtn.ariaLabel = this.editing ? "Bearbeiten: an" : "Bearbeiten: aus";
     this.editBtn.classList.toggle("on", this.editing);
     const errs = this.desc?.errors ?? [];
     this.status.replaceChildren(errs.length
       ? h("button", { class: "err", onclick: () => { this.tab = "balance"; this.render(); } }, `${errs.length} Fehler`)
       : this.dirty ? h("span", { class: "muted" }, "ungespeichert") : "");
     this.banner.replaceChildren(this.picking
-      ? h("div", {}, `Neuen Elternknoten für »${this.net.name(this.picking, this.hass)}« anklicken – Netzanschluss oder Kasten-Phase für direkte Einspeisung. `,
-        h("button", { class: "chip", onclick: () => this.stopPick() }, "Abbrechen"))
+      ? h("div", { class: "row wrap" },
+          h("span", { class: "grow" }, this.pickPending
+            ? ["»", h("b", {}, this.net.name(this.picking, this.hass)), "« hängen an: ", h("b", {}, this.pickLabel(this.pickPending))]
+            : `Neuen Elternknoten für »${this.net.name(this.picking, this.hass)}« anklicken (Doppelklick klappt weiter auf). Netzanschluss oder Kasten-Phase = direkte Einspeisung.`),
+          this.pickPending ? h("button", { class: "btn primary", onclick: () => this.confirmPick() }, "Hierher umhängen") : null,
+          h("button", { class: "chip", onclick: () => this.stopPick() }, "Abbrechen"))
       : "");
     this.banner.classList.toggle("show", !!this.picking);
   }
 
   renderView() {
     if (!this.net) return;
+    // Scrollposition der Ansicht und Zustand des Seitenpanels über das Neuzeichnen retten
+    const oldView = this.main.firstChild?.firstChild;
+    const viewScroll = this._lastTab === this.tab && oldView ? { top: oldView.scrollTop, left: oldView.scrollLeft } : null;
+    const editorState = this.editor?.snapshot?.();
+    this._lastTab = this.tab;
     const body = h("div", { class: `body tab-${this.tab}` });
     if (this.tab === "flow") {
       this.flow.render();
@@ -211,6 +262,11 @@ class StromnetzPanel extends HTMLElement {
     this.editor.render(this.validSelection());
     body.append(this.editor.el);
     this.main.replaceChildren(body);
+    if (viewScroll && this.tab !== "flow" && body.firstChild) {
+      body.firstChild.scrollTop = viewScroll.top;
+      body.firstChild.scrollLeft = viewScroll.left;
+    }
+    this.editor.restore?.(editorState);
     if (this.tab === "flow" && !this.flow.fitted) requestAnimationFrame(() => { this.flow.fitted = true; this.flow.fit(); });
     this.buildSearchList();
   }
@@ -229,6 +285,7 @@ class StromnetzPanel extends HTMLElement {
     if (this.tab === "flow") this.flow.updateValues();
     if (this.tab === "cabinet") this.cabinetView.updateValues();
     if (this.tab === "balance") this.balanceLive?.forEach((l) => l());
+    if (this.tab === "data") this.shellyLive?.forEach((l) => l());
     this.editor.updateValues();
   }
 
@@ -386,6 +443,7 @@ class StromnetzPanel extends HTMLElement {
   // ── Umhängen ──────────────────────────────────────────────────────────────
   startPick(id) {
     this.picking = id;
+    this.pickPending = null;
     if (this.tab !== "flow") {
       this.tab = "flow";
       this.render();
@@ -397,24 +455,43 @@ class StromnetzPanel extends HTMLElement {
 
   stopPick() {
     this.picking = null;
+    this.pickPending = null;
     this.renderStatus();
     this.renderView();
   }
 
+  // Klick wählt im Umhängen-Modus nur das Ziel; erst »Hierher umhängen« im Banner führt es aus
   pickTarget(t) {
     if (!this.picking) return;
     const n = this.net.nodes.get(this.picking);
-    if (t.type === "node") {
-      if (t.id === n.id || this.net.isDescendant(t.id, n.id)) {
-        this.toast("Ein Knoten kann nicht an sich selbst oder an einen eigenen Abgang hängen.");
-        return;
-      }
-      n.parent = t.id;
-    } else {
+    if (t.type === "node" && (t.id === n.id || this.net.isDescendant(t.id, n.id))) {
+      this.toast("Ein Knoten kann nicht an sich selbst oder an einen eigenen Abgang hängen.");
+      return;
+    }
+    this.pickPending = t;
+    this.renderStatus();
+    this.flow.markPickTarget?.(t);
+  }
+
+  pickLabel(t) {
+    if (!t) return "";
+    if (t.type === "node") return `${this.net.address(t.id)} ${this.net.name(t.id, this.hass)}`.trim();
+    if (t.type === "grid") return "Hauszuleitung";
+    const cab = t.cabinet ? this.net.cabinets.get(t.cabinet) : null;
+    return `Hauszuleitung${cab ? ` (${cab.code}${t.phase ? ` · ${PHASE_LABEL[t.phase]}` : ""})` : t.phase ? ` · ${PHASE_LABEL[t.phase]}` : ""}`;
+  }
+
+  confirmPick() {
+    const t = this.pickPending;
+    if (!this.picking || !t) return;
+    const n = this.net.nodes.get(this.picking);
+    if (t.type === "node") n.parent = t.id;
+    else {
       n.parent = GRID;
       if (t.phase && !n.module) n.phase = t.phase;
     }
     this.picking = null;
+    this.pickPending = null;
     this.selection = { type: "node", id: n.id };
     this.changed();
     this.flow.focus(n.id);
@@ -715,13 +792,14 @@ class StromnetzPanel extends HTMLElement {
   openPicker(cabId, at) {
     this.closeMenu();
     const net = this.net;
-    let cat = this._pickerCat ?? CATALOG[0].key;
+    const cats = CATALOG.filter((c) => c.din !== false);
+    let cat = cats.some((c) => c.key === this._pickerCat) ? this._pickerCat : cats[0].key;
     const left = h("nav", { class: "pk-cats" });
     const right = h("div", { class: "pk-list" });
     const fitsAt = (w) => (at ? net.fits(cabId, at.row, at.slot, w) : net.freeSlot(cabId, w).row !== null);
     const draw = () => {
-      left.replaceChildren(...CATALOG.map((c) => h("button", { class: c.key === cat ? "active" : "", onclick: () => { cat = c.key; this._pickerCat = cat; draw(); } }, c.name)));
-      const c = CATALOG.find((x) => x.key === cat);
+      left.replaceChildren(...cats.map((c) => h("button", { class: c.key === cat ? "active" : "", onclick: () => { cat = c.key; this._pickerCat = cat; draw(); } }, c.name)));
+      const c = cats.find((x) => x.key === cat);
       right.replaceChildren(...c.groups.map((g) => h("section", {},
         h("h4", {}, g.name),
         ...g.items.map((it) => {
@@ -749,7 +827,7 @@ class StromnetzPanel extends HTMLElement {
     this.pickerEl?.classList.remove("open");
   }
 
-  addChannel(mid) {
+  addChannel(mid, { silent = false } = {}) {
     const m = this.net.modules.get(mid);
     const nodes = this.net.moduleNodes.get(mid) ?? [];
     const c = Math.max(0, ...nodes.map((n) => n.channel ?? 0)) + 1;
@@ -760,8 +838,413 @@ class StromnetzPanel extends HTMLElement {
     this.data.nodes.push({ id, parent: breaker ? this.feedFor(cab, chPhase) : null, kind: breaker ? "breaker" : m.type === "relay" ? "relay" : "junction",
       name: `${m.model || m.label} Kanal ${c}`, seq: null, label: null, phase: chPhase,
       module: mid, channel: c, meter: null, switch: null, area: null, feed_in: false, sonstiges_id: null, notes: null, pos: null, collapsed: false });
+    if (silent) return id;
     this.selection = { type: "node", id };
     this.changed();
+    return id;
+  }
+
+  // ── Shelly ────────────────────────────────────────────────────────────────
+  async loadShelly(force = false) {
+    // Zwischenspeicher; nach 10 Minuten automatisch neu (das Panel bleibt in der App lange geladen)
+    if (!force && this.shelly && Date.now() - this.shelly.t < 600000) return this.shelly;
+    try {
+      const res = await this.hass.callWS({ type: "stromnetz/shelly" });
+      const byEntity = new Map();
+      for (const d of res.devices) for (const c of d.channels) for (const e of [c.switch, c.power]) if (e) byEntity.set(e, { dev: d, ch: c });
+      this.shelly = { ...res, t: Date.now(), byEntity, byId: new Map(res.devices.map((d) => [d.device_id, d])) };
+    } catch (err) {
+      this.shelly = { devices: [], discovered: [], byEntity: new Map(), byId: new Map(), t: Date.now(), error: String(err.message ?? err) };
+    }
+    return this.shelly;
+  }
+
+  // Wo ist ein HA-Gerät schon zugeordnet? Gerät (Modul) oder Knoten
+  deviceUse(devId) {
+    const m = this.data.modules.find((x) => x.device === devId);
+    if (m) return { type: "module", id: m.id, label: this.net.moduleTitle(m) };
+    const n = this.data.nodes.find((x) => x.device === devId);
+    if (n) return { type: "node", id: n.id, label: `${this.net.address(n.id)} ${this.net.name(n.id, this.hass)}` };
+    return null;
+  }
+
+  // Kanäle (Knoten) mit den Entities eines Shelly-Geräts belegen. targets: [{node, index}]
+  applyDevice(dev, targets) {
+    const conflicts = [];
+    for (const { node, index } of targets) {
+      const ch = dev.channels.find((c) => c.index === index);
+      if (!ch) continue;
+      if (node.switch && ch.switch && node.switch !== ch.switch) conflicts.push(`${node.switch} → ${ch.switch}`);
+      if (node.meter && ch.power && node.meter !== ch.power) conflicts.push(`${node.meter} → ${ch.power}`);
+    }
+    if (conflicts.length && !confirm(`Vorhandene Einträge überschreiben?\n\n${conflicts.join("\n")}`)) return false;
+    const used = new Set(this.data.nodes.filter((n) => !targets.some((t) => t.node === n)).map((n) => n.meter).filter(Boolean));
+    for (const { node, index } of targets) {
+      const ch = dev.channels.find((c) => c.index === index);
+      if (!ch) continue;
+      if (ch.switch) node.switch = ch.switch;
+      if (ch.power && !used.has(ch.power)) node.meter = ch.power;
+      const generic = !node.name || /Kanal \d+$|^(Relais|Shelly|Sicherung) /.test(node.name);
+      if (generic && ch.name) node.name = ch.name;
+    }
+    return true;
+  }
+
+  linkModuleDevice(m, devId) {
+    if (!devId) {
+      m.device = null;
+      this.changed();
+      return;
+    }
+    const dev = this.shelly?.byId.get(devId);
+    if (!dev) return;
+    const other = this.deviceUse(devId);
+    if (other && !(other.type === "module" && other.id === m.id) && !confirm(`${dev.name} ist schon bei ${other.label} zugeordnet. Trotzdem hier verknüpfen?`)) return;
+    while ((this.net.moduleNodes.get(m.id) ?? []).length < dev.channels.length) {
+      this.addChannel(m.id, { silent: true });
+      this.net = new Net(this.data, this.desc);
+    }
+    const nodes = (this.net.moduleNodes.get(m.id) ?? []).slice().sort((a, b) => (a.channel ?? 0) - (b.channel ?? 0));
+    const targets = dev.channels.map((c, i) => ({ node: nodes[i], index: c.index })).filter((t) => t.node);
+    if (!this.applyDevice(dev, targets)) return;
+    m.device = devId;
+    if (!m.model) m.model = dev.model;
+    this.changed();
+    this.toast(`${dev.name} verknüpft: ${targets.length} Kanäle belegt.`);
+  }
+
+  // Knoten (z. B. Unterputz-Shelly) mit einem HA-Gerät verknüpfen; mehrkanalig über die Kinder mit Kanalnummer
+  linkNodeDevice(n, devId, chIndex = null) {
+    if (!devId) {
+      n.device = null;
+      n.device_channel = null;
+      this.changed();
+      return;
+    }
+    const dev = this.shelly?.byId.get(devId);
+    if (!dev) return;
+    const kids = this.net.kids(n.id).map((k) => this.net.nodes.get(k)).filter((k) => k.channel);
+    let targets;
+    if (kids.length && chIndex === null) targets = kids.map((k) => ({ node: k, index: dev.channels[k.channel - 1]?.index ?? k.channel - 1 }));
+    else targets = [{ node: n, index: chIndex ?? dev.channels[0]?.index ?? 0 }];
+    if (!this.applyDevice(dev, targets)) return;
+    n.device = devId;
+    n.device_channel = kids.length && chIndex === null ? null : targets[0].index;
+    if (!n.model) n.model = dev.model;
+    for (const t of targets) if (t.node !== n) t.node.device = devId;
+    this.changed();
+    this.toast(`${dev.name} verknüpft.`);
+  }
+
+  // Unterputz-/Stecker-Shelly als Knoten hinter `parent` anlegen
+  insertFlush(parent, item, devId = null) {
+    const ids = this.ids();
+    const base = { seq: null, label: null, phase: null, module: null, meter: null, switch: null, area: null, feed_in: false,
+      sonstiges_id: null, notes: null, pos: null, collapsed: false, device: null, device_channel: null, model: item.model };
+    let top;
+    if (item.channels > 1) {
+      top = { ...base, id: newId(slug(item.model), ids), parent, kind: "junction", name: item.model, channel: null };
+      ids.add(top.id);
+      this.data.nodes.push(top);
+      for (let c = 1; c <= item.channels; c++) {
+        const id = newId(slug(`${item.model}_${c}`), ids);
+        ids.add(id);
+        this.data.nodes.push({ ...base, id, parent: top.id, kind: item.kind, name: `${item.model} Kanal ${c}`, channel: c });
+      }
+    } else {
+      top = { ...base, id: newId(slug(item.model), ids), parent, kind: item.kind, name: item.model, channel: 1 };
+      this.data.nodes.push(top);
+    }
+    this.flow.collapsed.delete(parent);
+    this.closePicker();
+    this.net = new Net(this.data, this.desc);
+    if (devId) this.linkNodeDevice(top, devId);
+    if (this.selection) this.navStack.push(this.selection);
+    this.selection = { type: "node", id: top.id };
+    this.changed();
+    return top.id;
+  }
+
+  openFlushPicker(parent) {
+    this.closeMenu();
+    const cats = CATALOG.filter((c) => c.din === false);
+    const list = h("div", { class: "pk-list" },
+      ...cats.flatMap((c) => c.groups).map((g) => h("section", {}, h("h4", {}, g.name),
+        ...g.items.map((it) => h("button", { class: "pk-item", onclick: () => this.insertFlush(parent, it) },
+          h("i", { class: "pk-sw none" }), h("span", { class: "grow" }, h("b", {}, it.name), h("span", { class: "muted" }, ` · ${it.sub}`)),
+          h("span", { class: "muted" }, `${it.channels} ${it.channels > 1 ? "Kanäle" : "Kanal"}`))))));
+    this.pickerEl.replaceChildren(h("div", { class: "pk-dialog", role: "dialog", "aria-label": "Shelly-Modul anschließen", onclick: (e) => e.stopPropagation() },
+      h("div", { class: "pk-head" }, h("div", {}, h("b", {}, "Unterputz-Modul oder Zwischenstecker"), h("span", { class: "muted" }, ` · hinter ${this.net.address(parent) || this.net.name(parent, this.hass)}`)),
+        h("button", { class: "icon-btn", "aria-label": "Schließen", onclick: () => this.closePicker() }, icon(MDI.close))),
+      h("div", { class: "pk-body" }, list),
+      h("div", { class: "pk-foot muted" }, "Wird als Knoten im Fluss angelegt (z. B. in einer Abzweigdose). Danach unter »Shelly-Gerät« mit HA verknüpfen.")));
+    this.pickerEl.classList.add("open");
+  }
+
+  // Daten-Tab: alle Shelly-Geräte aus HA mit Zuordnung, plus im Netzwerk gefundene
+  // Daten-Tab: Shelly-Geräte aus HA (zwischengespeichert), gruppiert nach Aktion, Bereich oder Modell
+  get shellyGroup() {
+    try { return localStorage.getItem("stromnetz.shellygroup") ?? "action"; } catch { return this._shellyGroup ?? "action"; }
+  }
+
+  set shellyGroup(v) {
+    this._shellyGroup = v;
+    try { localStorage.setItem("stromnetz.shellygroup", v); } catch { /* ohne Speicher */ }
+  }
+
+  shellySection() {
+    const box = h("section", { class: "card-box shelly-box" });
+    const draw = (sh) => {
+      this.shellyLive = [];
+      const coll = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+      const areaOf = (d) => (d.area_id ? this.net.areaName(d.area_id) : "");
+      const ACTIONS = { dup: "Doppelt angelegt – zusammenführen", link: "Mit vorhandenen Knoten verknüpfen", cabinet: "In Kasten einsetzen", node: "Als Knoten anlegen", linked: "Bereits zugeordnet" };
+      const entries = sh.devices.map((d) => {
+        const use = this.deviceUse(d.device_id);
+        const item = catalogForDevice(d);
+        const existing = !use ? this.existingForDevice(d) : [];
+        // Verknüpft, aber ein anderer Knoten trägt die Zähler/Schalter → doppelt
+        const dupes = use?.type === "node" ? this.existingForDevice(d, { exclude: use.id }).filter((e) => e.node.device !== d.device_id || e.node.id !== use.id) : [];
+        const linkedOwn = use?.type === "node" ? this.net.nodes.get(use.id) : null;
+        const isDup = dupes.length && linkedOwn && !linkedOwn.meter;
+        const action = isDup ? "dup" : use ? "linked" : existing.length ? "link" : item && item.din !== false ? "cabinet" : "node";
+        return { d, use, item, existing: isDup ? dupes : existing, action, area: areaOf(d) };
+      });
+      const mode = this.shellyGroup;
+      const keyOf = (e) => (mode === "area" ? e.area || "Ohne Bereich" : mode === "model" ? e.d.model ?? "?" : ACTIONS[e.action]);
+      const groupOrder = mode === "action" ? Object.values(ACTIONS) : null;
+      const groups = new Map();
+      for (const e of entries) {
+        const k = keyOf(e);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(e);
+      }
+      const keys = [...groups.keys()].sort((a, b) => groupOrder
+        ? groupOrder.indexOf(a) - groupOrder.indexOf(b)
+        : (a === "Ohne Bereich") - (b === "Ohne Bereich") || coll.compare(a, b));
+      const free = entries.filter((e) => !e.use).length;
+      const seg = h("div", { class: "segment wheel", role: "group", "aria-label": "Gruppieren nach" },
+        h("span", { class: "wl" }, "Gruppieren"),
+        ...[["action", "Aktion"], ["area", "Bereich"], ["model", "Modell"]].map(([k, l]) => h("button", {
+          class: mode === k ? "active" : "", "aria-pressed": mode === k ? "true" : "false",
+          onclick: () => { this.shellyGroup = k; draw(this.shelly); },
+        }, l)));
+      const loaded = new Date(sh.t).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" });
+      const head = h("div", { class: "row wrap shelly-head" },
+        h("h3", { class: "grow" }, "Shelly-Geräte"), seg,
+        h("button", { class: "chip", title: "Liste neu aus Home Assistant laden", onclick: async () => { box.classList.add("loading"); draw(await this.loadShelly(true)); } },
+          icon("M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z", 16), ` Aktualisieren`));
+      const rows = [head, h("p", { class: "muted small" }, `${sh.devices.length} Geräte in HA, davon ${free} noch nicht zugeordnet · Stand ${loaded}`)];
+      if (sh.error) rows.push(h("p", { class: "err-line" }, sh.error));
+      for (const k of keys) {
+        const list = groups.get(k).sort((a, b) => coll.compare(a.area || "~", b.area || "~") || coll.compare(a.d.name ?? "", b.d.name ?? ""));
+        rows.push(h("h4", {}, `${k} (${list.length})`));
+        for (const e of list) rows.push(this.shellyRow(e));
+      }
+      if (sh.discovered.length) {
+        rows.push(h("h4", {}, `Im Netzwerk gefunden, noch nicht in HA (${sh.discovered.length})`));
+        for (const f of sh.discovered) {
+          rows.push(h("div", { class: "shelly-row" }, h("div", { class: "grow" }, h("b", {}, f.name ?? "Shelly"), h("div", { class: "muted small" }, f.host ?? f.source ?? "")),
+            h("button", { class: "chip", onclick: () => this.navigateHA("/config/integrations/integration/shelly") }, "In HA einrichten")));
+        }
+      } else rows.push(h("p", { class: "muted small" }, "Keine neuen Shelly-Geräte im Netzwerk entdeckt (Erkennung über Home Assistant)."));
+      box.classList.remove("loading");
+      box.replaceChildren(...rows);
+      this.shellyLive.forEach((l) => l());
+    };
+    if (this.shelly) draw(this.shelly);
+    else {
+      box.replaceChildren(h("h3", {}, "Shelly-Geräte"), h("p", { class: "muted" }, "Lade …"));
+      this.loadShelly().then(draw);
+    }
+    return box;
+  }
+
+  // Daten › Knoten: alle Knoten mit Zuordnung (Area/Topf), filter- und gruppierbar
+  nodesSection() {
+    const box = h("section", { class: "card-box nodes-box" });
+    const load = (k, def) => { try { const v = localStorage.getItem(`stromnetz.nodes.${k}`); return v === null ? def : JSON.parse(v); } catch { return def; } };
+    const store = (k, v) => { try { localStorage.setItem(`stromnetz.nodes.${k}`, JSON.stringify(v)); } catch { /* ohne Speicher */ } };
+    const st = this._nodesState ??= { kinds: new Set(load("kinds", [])), only: load("only", false), group: load("group", "area"), q: "" };
+    const coll = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+    const areaOpts = (inh) => {
+      const areas = Object.entries(this.desc.areas ?? {}).sort((a, b) => coll.compare(a[1].name, b[1].name));
+      return [h("option", { value: "" }, inh ? `— erbt: ${this.net.areaName(inh)} —` : "— keine —"),
+        h("optgroup", { label: "Töpfe" }, ...Object.entries(this.data.pots ?? {}).map(([k, v]) => h("option", { value: k }, v.name ?? k))),
+        h("optgroup", { label: "Areas" }, ...areas.map(([k, v]) => h("option", { value: k }, v.name)))];
+    };
+    const areaCell = (n) => {
+      const eff = this.net.area(n.id);
+      const inh = n.parent && n.parent !== GRID ? this.net.area(n.parent) : null;
+      const label = n.area ? this.net.areaName(n.area) : eff ? `erbt: ${this.net.areaName(eff)}` : "keine Zuordnung";
+      // Auswahl erst beim Anklicken bauen (viele Knoten, schnell auch am Handy)
+      const btn = h("button", { class: `area-btn${n.area ? "" : eff ? " inh" : " none"}`, title: "Area / Topf ändern" }, label);
+      btn.addEventListener("click", () => {
+        const sel = h("select", {}, ...areaOpts(inh));
+        sel.value = n.area ?? "";
+        sel.addEventListener("change", () => { n.area = sel.value || null; this.changed(); });
+        sel.addEventListener("blur", () => { if (sel.isConnected) sel.replaceWith(btn); });
+        btn.replaceWith(sel);
+        sel.focus();
+      });
+      return btn;
+    };
+    // Suchfeld bleibt über Neuzeichnungen erhalten (Fokus und Cursor)
+    const search = h("input", { type: "search", placeholder: "Name, Adresse, Zähler …", value: st.q });
+    search.addEventListener("input", debounce(() => { st.q = search.value; draw(); }, 250));
+    const draw = () => {
+      const all = this.data.nodes;
+      const counts = new Map();
+      for (const n of all) counts.set(n.kind, (counts.get(n.kind) ?? 0) + 1);
+      const kinds = Object.keys(KIND_LABEL).filter((k) => counts.has(k));
+      const q = st.q.trim().toLowerCase();
+      const shown = all.filter((n) => (!st.kinds.size || st.kinds.has(n.kind)) && (!st.only || !this.net.area(n.id))
+        && (!q || `${this.net.address(n.id)} ${this.net.name(n.id, this.hass)} ${n.meter ?? ""}`.toLowerCase().includes(q)));
+      const unassigned = all.filter((n) => !this.net.area(n.id)).length;
+      const keyOf = (n) => st.group === "area" ? (this.net.area(n.id) ? this.net.areaName(this.net.area(n.id)) : "Ohne Zuordnung")
+        : st.group === "kind" ? KIND_LABEL[n.kind] : "";
+      const groups = new Map();
+      for (const n of shown) { const k = keyOf(n); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(n); }
+      const keys = [...groups.keys()].sort((a, b) => (b === "Ohne Zuordnung") - (a === "Ohne Zuordnung") || coll.compare(a, b));
+      const seg = h("div", { class: "segment wheel", role: "group", "aria-label": "Gruppieren" }, h("span", { class: "wl" }, "Gruppieren"),
+        ...[["area", "Zuordnung"], ["kind", "Knotenart"], ["none", "keine"]].map(([k, l]) => h("button", {
+          class: st.group === k ? "active" : "", onclick: () => { st.group = k; store("group", k); draw(); } }, l)));
+      const chips = h("div", { class: "row wrap" },
+        h("button", { class: `chip${st.kinds.size ? "" : " active"}`, onclick: () => { st.kinds.clear(); store("kinds", []); draw(); } }, `Alle (${all.length})`),
+        ...kinds.map((k) => h("button", { class: `chip${st.kinds.has(k) ? " active" : ""}`, "aria-pressed": st.kinds.has(k) ? "true" : "false",
+          onclick: () => { st.kinds.has(k) ? st.kinds.delete(k) : st.kinds.add(k); store("kinds", [...st.kinds]); draw(); } }, `${KIND_LABEL[k]} (${counts.get(k)})`)));
+      const onlyBtn = h("button", { class: `chip${st.only ? " active" : ""}`, onclick: () => { st.only = !st.only; store("only", st.only); draw(); } }, `Nur ohne Zuordnung (${unassigned})`);
+      const row = (n) => {
+        const parent = n.parent && n.parent !== GRID ? this.net.name(n.parent, this.hass) : n.parent === GRID ? "Hauszuleitung" : "nicht verbunden";
+        return h("div", { class: "ua-row" },
+          h("button", { class: "slink", title: "Im Fluss zeigen", onclick: () => { this.tab = "flow"; this.selection = { type: "node", id: n.id }; this.render(); this.flow.focus(n.id); } },
+            h("span", { class: "saddr" }, this.net.address(n.id) || "–"), h("span", { class: "sname" }, this.net.name(n.id, this.hass))),
+          h("span", { class: "muted small ua-kind" }, KIND_LABEL[n.kind]),
+          h("span", { class: "muted small ua-parent", title: "hängt an" }, parent),
+          areaCell(n));
+      };
+      const body = [];
+      for (const k of keys) {
+        const list = groups.get(k).sort((a, b) => coll.compare(this.net.address(a.id) || "~", this.net.address(b.id) || "~"));
+        if (k) body.push(h("h4", {}, `${k} (${list.length})`));
+        body.push(...list.map(row));
+      }
+      box.replaceChildren(
+        h("div", { class: "row wrap" }, h("h3", { class: "grow" }, "Knoten"),
+          h("span", { class: "muted small" }, "Zuordnung = eigene Area/Topf oder vom Elternknoten geerbt. Klick auf die Zuordnung zum Ändern.")),
+        h("div", { class: "nodes-tools" }, search, seg, onlyBtn),
+        chips,
+        shown.length ? h("div", { class: "ua-list" }, ...body) : h("p", { class: "muted" }, "Keine passenden Knoten."));
+    };
+    draw();
+    return box;
+  }
+
+  shellyRow({ d, use, item, existing, action: kind, area }) {
+    const nodeBtn = () => h("button", { class: "chip", title: "Als nicht verbundenen Knoten anlegen; danach im Fluss umhängen", onclick: () => {
+      const it = item ?? { model: d.model ?? "Shelly", channels: d.channels.length, kind: d.channels.some((c) => c.switch) ? "relay" : "junction" };
+      this.insertFlush(null, { ...it, channels: d.channels.length }, d.device_id);
+      this.tab = "flow";
+      this.render();
+    } }, "+ Als Knoten anlegen");
+    let action = kind === "dup"
+      ? h("button", { class: "chip warn", title: `Verknüpft mit ${use.label}, Zähler liegt aber bei ${existing.map((e) => this.net.address(e.node.id)).join(", ")}`,
+          onclick: () => { this.mergeDuplicate(d, use.id, existing); this.render(); } },
+          `Zusammenführen mit ${this.net.address(existing[0].node.id) || this.net.name(existing[0].node.id, this.hass)}`)
+      : kind === "linked"
+      ? h("button", { class: "chip", onclick: () => { this.tab = use.type === "module" ? "cabinet" : "flow"; if (use.type === "module") this.cabinetView.current = this.net.modules.get(use.id).cabinet; this.selection = { type: use.type, id: use.id }; this.render(); } }, use.label)
+      : kind === "link"
+        ? h("button", { class: "chip", title: existing.map((e) => `${this.net.address(e.node.id)} ${this.net.name(e.node.id, this.hass)}`).join("\n"),
+            onclick: () => { this.linkExisting(d, existing); this.render(); } },
+            `Verknüpfen mit ${existing.length === 1 ? this.net.address(existing[0].node.id) || this.net.name(existing[0].node.id, this.hass) : `${existing.length} Knoten`}`)
+        : kind === "cabinet" || (kind === "node" && dinVariant(item))
+          ? (() => {
+              const din = dinVariant(item);
+              const sel = h("select", {}, h("option", { value: "" }, kind === "node" ? "Auf Hutschiene in Kasten …" : "In Kasten einsetzen …"), ...this.data.cabinets.map((c) => h("option", { value: c.id }, `${c.code} · ${c.name}`)));
+              sel.addEventListener("change", () => {
+                if (!sel.value) return;
+                this.insertItem(sel.value, din, null);
+                const m = this.net.modules.get(this.selection.id);
+                this.net = new Net(this.data, this.desc);
+                this.linkModuleDevice(m, d.device_id);
+                this.tab = "cabinet";
+                this.cabinetView.current = sel.value;
+                this.render();
+              });
+              return sel;
+            })()
+          : nodeBtn();
+    if (kind === "node" && dinVariant(item)) action = h("div", { class: "row wrap shelly-acts" }, action, nodeBtn());
+    const chans = h("div", { class: "shelly-chans" }, ...d.channels.map((c) => {
+      const v = h("span", { class: "cv" });
+      this.shellyLive.push(() => { v.textContent = fmtW(num(this.hass, c.power)); });
+      const st = c.switch ? this.hass.states[c.switch]?.state : null;
+      return h("span", { class: `ch${st === "on" ? " on" : ""}`, title: [c.switch, c.power].filter(Boolean).join("\n") },
+        d.channels.length > 1 ? h("b", {}, `K${c.index + 1}`) : null,
+        d.channels.length > 1 && c.name ? h("span", { class: "cn" }, c.name.replace(d.name, "").trim() || c.name) : null,
+        c.power ? v : h("span", { class: "cv muted" }, "–"));
+    }));
+    return h("div", { class: "shelly-row" },
+      h("div", { class: "grow" },
+        h("div", {}, area ? h("span", { class: "area-tag first" }, area) : null, h("b", {}, d.name)),
+        h("div", { class: "muted small" },
+          `${d.model ?? "?"}${d.model_id ? ` (${d.model_id})` : ""} · ${d.channels.length} ${d.channels.length > 1 ? "Kanäle" : "Kanal"}${item ? ` · Vorlage: ${item.name}` : ""}`),
+        chans),
+      h("button", { class: "icon-btn small", title: "In HA öffnen", "aria-label": `${d.name} in HA öffnen`, onclick: () => this.navigateHA(`/config/devices/device/${d.device_id}`) }, icon(MDI.link, 16)),
+      action);
+  }
+
+  // Knoten, die Zähler oder Schalter dieses Geräts tragen – über alle Entities des Shelly (auch Untergeräte)
+  existingForDevice(dev, { exclude = null } = {}) {
+    const ents = new Set([...(dev.entities ?? []), ...dev.channels.flatMap((c) => [c.power, c.switch])].filter(Boolean));
+    const out = [];
+    for (const n of this.data.nodes) {
+      if (n.id === exclude || !((n.meter && ents.has(n.meter)) || (n.switch && ents.has(n.switch)))) continue;
+      const ch = dev.channels.find((c) => (c.power && c.power === n.meter) || (c.switch && c.switch === n.switch))
+        ?? (dev.channels.length === 1 ? dev.channels[0] : null);
+      out.push({ node: n, index: ch?.index ?? dev.channels[0]?.index ?? 0 });
+    }
+    return out;
+  }
+
+  // Gerät ist an einem Knoten verknüpft, ein anderer Knoten trägt aber dessen Zähler: zusammenführen
+  mergeDuplicate(dev, linkedId, existing) {
+    const dup = this.net.nodes.get(linkedId);
+    const keep = existing[0].node;
+    const kids = this.net.kids(dup.id).length;
+    if (!confirm(`»${this.net.name(dup.id, this.hass)}« (${this.net.address(dup.id)}) und »${this.net.name(keep.id, this.hass)}« (${this.net.address(keep.id)}) sind dasselbe Gerät.\n\nDen vorhandenen Knoten behalten und mit ${dev.name} verknüpfen, den doppelten entfernen?${kids ? `\n${kids} Abgänge des doppelten Knotens werden an seine Stelle gehängt.` : ""}`)) return;
+    this.dissolveNodes([dup.id]);
+    this.net = new Net(this.data, this.desc);
+    for (const e of existing) {
+      e.node.device = dev.device_id;
+      e.node.device_channel = dev.channels.length > 1 ? e.index : null;
+      if (!e.node.model) e.node.model = dev.model;
+    }
+    this.applyDevice(dev, existing);
+    this.selection = { type: "node", id: keep.id };
+    this.changed();
+    this.toast(`Zusammengeführt: ${this.net.name(keep.id, this.hass)} ist jetzt mit ${dev.name} verknüpft.`);
+  }
+
+  linkExisting(dev, existing) {
+    const mods = new Set(existing.map((e) => e.node.module).filter(Boolean));
+    if (mods.size === 1 && existing.every((e) => e.node.module)) {
+      this.linkModuleDevice(this.net.modules.get([...mods][0]), dev.device_id);
+      return;
+    }
+    if (!this.applyDevice(dev, existing)) return;
+    for (const e of existing) {
+      e.node.device = dev.device_id;
+      e.node.device_channel = dev.channels.length > 1 ? e.index : null;
+      if (!e.node.model) e.node.model = dev.model;
+    }
+    this.changed();
+    this.toast(`${dev.name} mit ${existing.length} vorhandenen Knoten verknüpft.`);
+  }
+
+  navigateHA(path) {
+    history.pushState(null, "", path);
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
   }
 
   // Gerät in einen anderen Kasten umsetzen; Einspeisung der Kanäle wird mitgeführt
@@ -917,6 +1400,32 @@ class StromnetzPanel extends HTMLElement {
     const grid = PHASES.filter((p) => this.data.grid.phases[p]?.meter).map((p) => ({ entity_id: this.data.grid.phases[p].meter, label: `Zuleitung ${PHASE_LABEL[p]}`, color: colors[p] }));
     const rest = PHASES.filter((p) => this.net.gridRestEntity(p)).map((p) => ({ entity_id: this.net.gridRestEntity(p), label: `${PHASE_LABEL[p]} nicht erfasst`, color: colors[p] }));
     const errs = this.desc.errors ?? [], warns = this.desc.warnings ?? [];
+    // Räume und Töpfe: ein Balken je Raum, der Sonstiges-Anteil rot am rechten Ende
+    const roomTable = () => {
+      const rooms = by("raum");
+      if (!rooms.length) return null;
+      const sonst = new Map(by("raum_sonstiges").map((x) => [x.raum, x.entity_id]));
+      const max = () => Math.max(1, ...rooms.map((r) => num(this.hass, r.entity_id) ?? 0));
+      return h("section", { class: "card-box rooms-box" },
+        h("div", { class: "row wrap" }, h("h3", { class: "grow" }, "Räume und Töpfe"),
+          h("span", { class: "legend-inline" }, h("span", {}, h("i", { style: { background: "var(--sn-accent)" } }), "gemessen"),
+            h("span", {}, h("i", { style: { background: "var(--error-color, #db4437)" } }), "Sonstiges"))),
+        ...rooms.map((r) => {
+          const se = sonst.get(r.raum);
+          const val = h("span", { class: "bval" });
+          const restSeg = h("i", { class: "rest" });
+          const tot = h("span", { class: "tot" }, h("i", { class: "known" }), restSeg);
+          this.balanceLive.push(() => {
+            const v = Math.max(0, num(this.hass, r.entity_id) ?? 0);
+            const sv = se ? Math.min(v, Math.max(0, num(this.hass, se) ?? 0)) : 0;
+            tot.style.width = `${(v / max()) * 100}%`;
+            restSeg.style.width = v ? `${(sv / v) * 100}%` : "0";
+            val.replaceChildren(fmtW(v), se && sv ? h("span", { class: "sv" }, `davon ${fmtW(sv)} · ${Math.round((sv / (v || 1)) * 100)} %`) : "");
+          });
+          return h("button", { class: "brow tall", title: se ? "Klick: Verlauf · Sonstiges separat im Sensor " + se : "Klick: Verlauf", onclick: () => this.moreInfo(r.entity_id) },
+            h("span", { class: "bname" }, r.label), h("span", { class: "bar split" }, tot), val);
+        }));
+    };
     // Sankey nach Stockwerk und Raum, volle Breite, live und bei Größenänderung neu gezeichnet
     const sankeyHost = h("div", { class: "sankey-host" });
     const drawSankey = () => {
@@ -951,7 +1460,7 @@ class StromnetzPanel extends HTMLElement {
       })(),
       table("Zuleitung", grid), table("Phasen", phases), table("Nicht erfasst", rest),
       table("Kästen je Phase", by("kasten").map((x) => ({ ...x, color: colors[x.phase] }))),
-      table("Stockwerke", by("stockwerk")), table("Räume und Töpfe", by("raum")), table("Raum-Sonstiges", by("raum_sonstiges")));
+      table("Stockwerke", by("stockwerk")), roomTable());
     queueMicrotask(() => this.balanceLive.forEach((l) => l()));
     return el;
   }
@@ -967,7 +1476,14 @@ class StromnetzPanel extends HTMLElement {
     };
     const pots = Object.entries(this.data.pots ?? {});
     const floors = Object.entries(this.desc.floors ?? {});
+    let sub;
+    try { sub = localStorage.getItem("stromnetz.datatab") ?? "nodes"; } catch { sub = this._dataTab ?? "nodes"; }
+    const subtabs = h("div", { class: "subtabs" }, ...[["nodes", "Knoten"], ["shelly", "Shelly-Geräte"], ["settings", "Einstellungen"]].map(([k, l]) =>
+      h("button", { class: `chip${sub === k ? " active" : ""}`, onclick: () => { this._dataTab = k; try { localStorage.setItem("stromnetz.datatab", k); } catch { /* ohne Speicher */ } this.renderView(); } }, l)));
+    if (sub === "nodes") return h("div", { class: "datapage" }, subtabs, this.nodesSection());
+    if (sub === "shelly") return h("div", { class: "datapage" }, subtabs, this.shellySection());
     return h("div", { class: "datapage" },
+      subtabs,
       h("section", { class: "card-box" }, h("h3", {}, "Export"),
         h("p", { class: "muted" }, "Gespeicherter Stand als YAML, z. B. für Backup oder Git."),
         h("div", { class: "row" },

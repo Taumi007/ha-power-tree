@@ -40,13 +40,14 @@ export const CATALOG = [
   },
   {
     key: "relay", name: "Relais & Aktoren", groups: [
+      // Maße laut Shelly Knowledge Base: Pro 1/1PM/2/2PM 94×19×69 mm (1 TE), Pro 3/4PM 96×53×59 mm (3 TE)
       { name: "Shelly Pro", items: [
-        { key: "pro1", name: "Shelly Pro 1", sub: "1 Kanal, ohne Messung", type: "relay", model: "Shelly Pro 1", width: 1, poles: 1, channels: 1, kind: "relay" },
-        { key: "pro1pm", name: "Shelly Pro 1PM", sub: "1 Kanal mit Messung", type: "relay", model: "Shelly Pro 1PM", width: 1, poles: 1, channels: 1, kind: "relay" },
-        { key: "pro2", name: "Shelly Pro 2", sub: "2 Kanäle, ohne Messung", type: "relay", model: "Shelly Pro 2", width: 2, poles: 2, channels: 2, kind: "relay" },
-        { key: "pro2pm", name: "Shelly Pro 2PM", sub: "2 Kanäle mit Messung", type: "relay", model: "Shelly Pro 2PM", width: 2, poles: 2, channels: 2, kind: "relay" },
-        { key: "pro3", name: "Shelly Pro 3", sub: "3 Kanäle, ohne Messung", type: "relay", model: "Shelly Pro 3", width: 3, poles: 3, channels: 3, kind: "relay" },
-        { key: "pro4pm", name: "Shelly Pro 4PM", sub: "4 Kanäle mit Messung", type: "relay", model: "Shelly Pro 4PM", width: 2, poles: 4, channels: 4, kind: "relay" },
+        { key: "pro1", name: "Shelly Pro 1", sub: "1 Kanal 16 A, ohne Messung", type: "relay", model: "Shelly Pro 1", width: 1, poles: 1, channels: 1, kind: "relay", match: /SPSW-[02]01X/i },
+        { key: "pro1pm", name: "Shelly Pro 1PM", sub: "1 Kanal 16 A, mit Messung", type: "relay", model: "Shelly Pro 1PM", width: 1, poles: 1, channels: 1, kind: "relay", match: /SPSW-[02]01P/i },
+        { key: "pro2", name: "Shelly Pro 2", sub: "2 Kanäle 16 A, ohne Messung", type: "relay", model: "Shelly Pro 2", width: 1, poles: 2, channels: 2, kind: "relay", match: /SPSW-[02]02X/i },
+        { key: "pro2pm", name: "Shelly Pro 2PM", sub: "2 Kanäle 16 A (25 A gesamt), mit Messung", type: "relay", model: "Shelly Pro 2PM", width: 1, poles: 2, channels: 2, kind: "relay", match: /SPSW-[02]02P/i },
+        { key: "pro3", name: "Shelly Pro 3", sub: "3 Kanäle 16 A, ohne Messung", type: "relay", model: "Shelly Pro 3", width: 3, poles: 3, channels: 3, kind: "relay", match: /SPSW-003X/i },
+        { key: "pro4pm", name: "Shelly Pro 4PM", sub: "4 Kanäle 16 A (40 A gesamt), mit Messung", type: "relay", model: "Shelly Pro 4PM", width: 3, poles: 4, channels: 4, kind: "relay", match: /SPSW-[01]04P/i },
       ] },
       { name: "Relais und Schütze", items: [
         { key: "relay1", name: "Relais 1-polig", sub: "1 Kanal", type: "relay", width: 1, poles: 1, channels: 1, kind: "relay" },
@@ -58,10 +59,53 @@ export const CATALOG = [
   {
     key: "meter", name: "Messgeräte", groups: [
       { name: "Energiemessung", items: [
-        { key: "pro3em", name: "Shelly Pro 3EM", sub: "3 Phasen", type: "meter", model: "Shelly Pro 3EM", width: 3, poles: 3, channels: 3, kind: "junction", phases: ["A", "B", "C"] },
-        { key: "proem", name: "Shelly Pro EM", sub: "1 Phase, 2 Messkanäle", type: "meter", model: "Shelly Pro EM", width: 1, poles: 1, channels: 2, kind: "junction" },
+        { key: "pro3em", name: "Shelly Pro 3EM", sub: "3 Phasen, Wandler bis 120 A, ohne Relais", type: "meter", model: "Shelly Pro 3EM", width: 1, poles: 3, channels: 3, kind: "junction", phases: ["A", "B", "C"], match: /SPEM-003C/i },
+        { key: "proem", name: "Shelly Pro EM-50", sub: "2 Messkanäle bis 50 A, Relais 2 A", type: "meter", model: "Shelly Pro EM-50", width: 1, poles: 1, channels: 2, kind: "junction", match: /SPEM-002C/i },
         { key: "meter1", name: "Zwischenzähler 1-phasig", sub: "1 Kanal", type: "meter", width: 1, poles: 1, channels: 1, kind: "junction" },
         { key: "meter3", name: "Zwischenzähler 3-phasig", sub: "3 Kanäle L1–L3", type: "meter", width: 4, poles: 3, channels: 3, kind: "junction", phases: ["A", "B", "C"] },
+      ] },
+    ],
+  },
+  {
+    // Unterputz-Shellys auf Hutschienen-Adapter im Kasten. Breite hängt vom Adapter ab (Mini 29×34 mm, sonst 37×42 mm) – im Gerät änderbar.
+    key: "shellydin", name: "Shelly Mini & Unterputz", groups: [
+      { name: "Shelly Mini (29×34 mm, auf Adapter)", items: [
+        { key: "d_1mini", name: "Shelly 1 Mini", sub: "1 Kanal, ohne Messung", type: "relay", model: "Shelly 1 Mini", width: 2, poles: 1, channels: 1, kind: "relay", variantOf: "s1mini", match: /S[N34]SW-001X8/i },
+        { key: "d_1pmmini", name: "Shelly 1PM Mini", sub: "1 Kanal 8 A, mit Messung", type: "relay", model: "Shelly 1PM Mini", width: 2, poles: 1, channels: 1, kind: "relay", variantOf: "s1pmmini", match: /S[N34]SW-001P8/i },
+        { key: "d_pmmini", name: "Shelly PM Mini", sub: "nur Messung bis 16 A, kein Relais", type: "meter", model: "Shelly PM Mini", width: 2, poles: 1, channels: 1, kind: "junction", variantOf: "spmmini", match: /S[N34]PM-001PC/i },
+        { key: "d_emmini", name: "Shelly EM Mini Gen4", sub: "nur Messung bis 16 A, direkt angeschlossen", type: "meter", model: "Shelly EM Mini", width: 2, poles: 1, channels: 1, kind: "junction", variantOf: "semmini", match: /S4EM-001P/i },
+      ] },
+      { name: "Shelly Unterputz (37×42 mm, auf Adapter)", items: [
+        { key: "d_1", name: "Shelly 1", sub: "1 Kanal, ohne Messung", type: "relay", model: "Shelly 1", width: 3, poles: 1, channels: 1, kind: "relay", variantOf: "s1", match: /S[N34]SW-001X16/i },
+        { key: "d_1pm", name: "Shelly 1PM", sub: "1 Kanal 16 A, mit Messung", type: "relay", model: "Shelly 1PM", width: 3, poles: 1, channels: 1, kind: "relay", variantOf: "s1pm", match: /S[N34]SW-001P16/i },
+        { key: "d_2pm", name: "Shelly 2PM", sub: "2 Kanäle 10 A (16 A gesamt), mit Messung", type: "relay", model: "Shelly 2PM", width: 3, poles: 2, channels: 2, kind: "relay", variantOf: "s2pm", match: /S[N34]SW-[01]02P16/i },
+        { key: "d_em", name: "Shelly EM", sub: "2 Messkanäle über Wandler", type: "meter", model: "Shelly EM", width: 3, poles: 1, channels: 2, kind: "junction", variantOf: "sem", match: /S[34]EM-002C/i },
+        { key: "d_dim010", name: "Shelly Dimmer 0/1-10V PM", sub: "1 Kanal, mit Messung", type: "relay", model: "Shelly Dimmer 0/1-10V PM", width: 3, poles: 1, channels: 1, kind: "relay", variantOf: "sdim010", match: /S[N34]DM-0010WW/i },
+        { key: "d_rgbwpm", name: "Shelly RGBW PM", sub: "12/24 V DC, als 1 Licht", type: "relay", model: "Shelly RGBW PM", width: 3, poles: 1, channels: 1, kind: "relay", variantOf: "srgbwpm", match: /S[N34]DC-0D4P10WW/i },
+      ] },
+    ],
+  },
+  {
+    // Kein Hutschienengerät: wird als Knoten in den Fluss gesetzt (Abzweigdose, Gerätedose, Steckdose)
+    key: "flush", name: "Unterputz & Stecker", din: false, groups: [
+      { name: "Shelly Unterputz (Plus, Gen3, Gen4)", items: [
+        { key: "s1", name: "Shelly 1", sub: "1 Kanal, ohne Messung", type: "relay", model: "Shelly 1", channels: 1, kind: "relay", din: false, match: /S[N34]SW-001X16/i },
+        { key: "s1pm", name: "Shelly 1PM", sub: "1 Kanal 16 A, mit Messung", type: "relay", model: "Shelly 1PM", channels: 1, kind: "relay", din: false, match: /S[N34]SW-001P16/i },
+        { key: "s2pm", name: "Shelly 2PM", sub: "2 Kanäle 10 A (16 A gesamt), mit Messung", type: "relay", model: "Shelly 2PM", channels: 2, kind: "relay", din: false, match: /S[N34]SW-[01]02P16/i },
+      ] },
+      { name: "Shelly Mini", items: [
+        { key: "s1mini", name: "Shelly 1 Mini", sub: "1 Kanal, ohne Messung", type: "relay", model: "Shelly 1 Mini", channels: 1, kind: "relay", din: false, match: /S[N34]SW-001X8/i },
+        { key: "s1pmmini", name: "Shelly 1PM Mini", sub: "1 Kanal 8 A, mit Messung", type: "relay", model: "Shelly 1PM Mini", channels: 1, kind: "relay", din: false, match: /S[N34]SW-001P8/i },
+        { key: "spmmini", name: "Shelly PM Mini", sub: "nur Messung bis 16 A, kein Relais", type: "meter", model: "Shelly PM Mini", channels: 1, kind: "junction", din: false, match: /S[N34]PM-001PC/i },
+        { key: "semmini", name: "Shelly EM Mini Gen4", sub: "nur Messung bis 16 A, direkt angeschlossen", type: "meter", model: "Shelly EM Mini", channels: 1, kind: "junction", din: false, match: /S4EM-001P/i },
+      ] },
+      { name: "Shelly Messung, Dimmer, LED", items: [
+        { key: "sem", name: "Shelly EM", sub: "2 Messkanäle über Wandler", type: "meter", model: "Shelly EM", channels: 2, kind: "junction", din: false, match: /S[34]EM-002C/i },
+        { key: "sdim010", name: "Shelly Dimmer 0/1-10V PM", sub: "1 Kanal, mit Messung", type: "relay", model: "Shelly Dimmer 0/1-10V PM", channels: 1, kind: "relay", din: false, match: /S[N34]DM-0010WW/i },
+        { key: "srgbwpm", name: "Shelly RGBW PM", sub: "12/24 V DC, als 1 Licht", type: "relay", model: "Shelly RGBW PM", channels: 1, kind: "relay", din: false, match: /S[N34]DC-0D4P10WW/i },
+      ] },
+      { name: "Zwischenstecker", items: [
+        { key: "splugs", name: "Shelly Plug S", sub: "1 Kanal, mit Messung (auch Outdoor)", type: "relay", model: "Shelly Plug S", channels: 1, kind: "outlet", din: false, match: /S[N34]PL-\d0112/i },
       ] },
     ],
   },
@@ -115,4 +159,21 @@ export function onColor(hex) {
   const v = parseInt(hex.slice(1), 16);
   const lum = (0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255)) / 255;
   return lum > 0.6 ? "#1b1b1b" : "#ffffff";
+}
+
+// Katalogeintrag zu einem Shelly-Gerät aus HA (über model_id, sonst über den Modellnamen)
+export function catalogForDevice(dev) {
+  // Unterputz-Vorlage (Knoten) zuerst, die Hutschienen-Variante gibt es über dinVariant()
+  const items = [...CATALOG_BY_KEY.values()].filter((i) => i.match).sort((a, b) => (a.din === false ? 0 : a.variantOf ? 2 : 1) - (b.din === false ? 0 : b.variantOf ? 2 : 1));
+  const byId = items.find((i) => dev.model_id && i.match.test(dev.model_id));
+  if (byId) return byId;
+  const name = (dev.model ?? "").toLowerCase().replace(/\s*(gen\s*\d|plus|v\d)\b/g, "").replace(/\s+/g, " ").trim();
+  return items.find((i) => i.model?.toLowerCase() === name) ?? null;
+}
+
+// Hutschienen-Variante einer Unterputz-Vorlage (z. B. 1PM Mini auf Adapter im Kasten)
+export function dinVariant(item) {
+  if (!item) return null;
+  if (item.din !== false) return item;
+  return [...CATALOG_BY_KEY.values()].find((i) => i.variantOf === item.key) ?? null;
 }

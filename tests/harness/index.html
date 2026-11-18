@@ -33,6 +33,7 @@
       if (msg.type === "stromnetz/validate") return { ...structuredClone(desc), data: msg.data };
       if (msg.type === "stromnetz/save") return { saved: true, ...structuredClone(desc), data: msg.data };
       if (msg.type === "stromnetz/export_yaml") return { yaml: "# Export\n" };
+      if (msg.type === "stromnetz/shelly") return fetch("shelly.json").then((r) => r.json());
       if (msg.type === "stromnetz/import_yaml") return { data: structuredClone(desc.data), notes: [] };
       throw new Error("unbekannt " + msg.type);
     },

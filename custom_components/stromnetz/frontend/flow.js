@@ -51,8 +51,16 @@ export class FlowView {
       b(MDI.fit, "Einpassen", () => this.fit()),
       this.wheelSwitch(),
       this.groupSwitch(),
-      h("button", { class: "chip", onclick: () => this.collapseTo("breaker") }, "Bis Sicherungen"),
-      h("button", { class: "chip", onclick: () => this.collapseTo(null) }, "Alles ausklappen"));
+      h("button", { class: "chip wide-only", onclick: () => this.collapseTo("breaker") }, "Bis Sicherungen"),
+      h("button", { class: "chip wide-only", onclick: () => this.collapseTo(null) }, "Alles ausklappen"),
+      // Handy: Ein-/Ausklappen im Menü, damit alles in eine Zeile passt
+      h("button", { class: "icon-btn narrow-only", title: "Mehr", "aria-label": "Weitere Ansichtsoptionen", onclick: (e) => {
+        e.stopPropagation();
+        this.p.menu(e.clientX, e.clientY - 90, [
+          { label: "Bis Sicherungen einklappen", icon: MDI.collapse, action: () => this.collapseTo("breaker") },
+          { label: "Alles ausklappen", icon: MDI.expand, action: () => this.collapseTo(null) },
+        ]);
+      } }, icon("M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z")));
   }
 
   // Gliederung unter dem Netzanschluss: je Kasten und Phase oder nur je Kasten
@@ -80,7 +88,7 @@ export class FlowView {
   }
 
   groupSwitch() {
-    const wrap = h("div", { class: "segment wheel", role: "group", "aria-label": "Gliederung",
+    const wrap = h("div", { class: "segment wheel group-mode", role: "group", "aria-label": "Gliederung",
       title: "Unter dem Netzanschluss nach Kasten und Phase oder nur nach Kasten gliedern" });
     const draw = () => {
       wrap.replaceChildren(h("span", { class: "wl" }, "Gliederung"),
@@ -119,7 +127,7 @@ export class FlowView {
   }
 
   wheelSwitch() {
-    const wrap = h("div", { class: "segment wheel", role: "group", "aria-label": "Mausrad",
+    const wrap = h("div", { class: "segment wheel wheel-mode", role: "group", "aria-label": "Mausrad",
       title: "Mausrad: Zoomen (Shift + Rad verschiebt) oder Verschieben (⌘/Strg + Rad zoomt). Mittlere Maustaste ziehen verschiebt immer." });
     const draw = () => {
       wrap.replaceChildren(h("span", { class: "wl" }, "Rad"),
@@ -306,6 +314,7 @@ export class FlowView {
     this.edges.setAttribute("height", maxY + 40);
     this.applyView();
     this.updateValues();
+    if (this.p.picking && this.p.pickPending) this.markPickTarget(this.p.pickPending);
     if (!this.fitted && this.el.isConnected) {
       this.fitted = true;
       requestAnimationFrame(() => this.fit());
@@ -389,7 +398,7 @@ export class FlowView {
             h("span", { class: "port", style: { background: this.phaseColor(p) } }));
         }));
       el.addEventListener("contextmenu", (e) => this.p.contextGrid(e));
-      el.addEventListener("click", () => this.p.openEditor({ type: "grid" }));
+      el.addEventListener("click", () => (this.p.picking ? this.p.pickTarget({ type: "grid" }) : this.p.openEditor({ type: "grid" })));
     } else if (it.type === "group") {
       const cab = it.cabinet ? net.cabinets.get(it.cabinet) : null;
       const v = h("span", { class: "val", style: { color: this.phaseColor(it.phase) } });
@@ -412,7 +421,7 @@ export class FlowView {
           h("div", { class: "sub" }, `${cab?.code ?? "?"} · Unterverteiler · ${it.members.length} Abgänge${it.hidden ? ` · +${it.hidden} eingeklappt` : ""}`)),
         v);
       el.addEventListener("dblclick", () => this.toggle(it.key));
-      el.addEventListener("click", () => this.p.select({ type: "cabinet", id: it.cabinet }));
+      el.addEventListener("click", () => (this.p.picking ? this.p.pickTarget({ type: "node", id: it.parentId }) : this.p.select({ type: "cabinet", id: it.cabinet })));
     } else if (it.type === "loose") {
       el = h("div", { ...base, class: "card group-card loose" },
         h("div", { class: "txt" }, h("div", { class: "title" }, "Nicht verbunden"),
@@ -469,6 +478,14 @@ export class FlowView {
   }
 
   // Ausklappen zeigt nur die direkten Kinder; deren eigene Abgänge bleiben eingeklappt
+  // Ausgewähltes Umhänge-Ziel hervorheben, ohne neu zu zeichnen (Doppelklick bleibt möglich)
+  markPickTarget(t) {
+    this.stage.querySelectorAll(".card.pick-target").forEach((c) => c.classList.remove("pick-target"));
+    const key = t.type === "node" ? t.id : t.type === "grid" ? "grid"
+      : [...this.cards.keys()].find((k) => k.startsWith("grp:") && k.split(":")[1] === (t.cabinet ?? "-") && (k.split(":")[2] === (t.phase ?? "?") || k.split(":")[2] === "*"));
+    this.cards.get(key)?.classList.add("pick-target");
+  }
+
   toggle(key) {
     const net = this.p.net;
     if (this.collapsed.has(key)) {

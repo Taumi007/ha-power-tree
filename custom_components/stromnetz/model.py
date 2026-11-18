@@ -89,13 +89,13 @@ def normalize(data: dict) -> dict:
         c.setdefault("area", None)
         c.setdefault("notes", None)
     for m in d["modules"]:
-        for f in ("row", "slot", "label", "model", "poles", "rating", "curve", "rcd", "rcd_ma", "notes"):
+        for f in ("row", "slot", "label", "model", "poles", "rating", "curve", "rcd", "rcd_ma", "notes", "device"):
             m.setdefault(f, None)
         m.setdefault("width", 1)
         m.setdefault("type", "breaker")
     for n in d["nodes"]:
         for f in ("name", "seq", "label", "phase", "module", "channel", "meter", "switch",
-                  "area", "sonstiges_id", "notes", "pos"):
+                  "area", "sonstiges_id", "notes", "pos", "device", "device_channel", "model"):
             n.setdefault(f, None)
         n.setdefault("parent", None)
         n.setdefault("kind", "junction")
@@ -126,6 +126,9 @@ class SensorDef:
     minus: list[str] = field(default_factory=list)
     node: str | None = None
     attrs: dict = field(default_factory=dict)
+    # Eigenes HA-Gerät statt "Stromnetz": {"kind": "topf"|"knoten", "key", "name", "area", "meter"}
+    device: dict | None = None
+    short: str | None = None       # Entitätsname am eigenen Gerät (z. B. "Verbraucher Leistung")
 
     @property
     def sources(self) -> list[str]:
@@ -398,12 +401,18 @@ class Netz:
             if not u["kids"]:
                 continue
             consumers = [self.nodes[c]["meter"] for c in u["kids"] if not self.nodes[c]["feed_in"]]
+            dev = None
+            if u["node"]:
+                dev = {"kind": "knoten", "key": u["node"], "name": u["name"], "meter": u["meter"],
+                       "area": u["area"] if u["area"] in self.areas else None}
             out.append(SensorDef(f"{u['id']}_verbraucher_leistung", f"{np}{u['name']} Verbraucher Leistung",
-                                 "verbraucher", consumers, node=u["node"], attrs=meta(u, entity_id=consumers)))
+                                 "verbraucher", consumers, node=u["node"], attrs=meta(u, entity_id=consumers),
+                                 device=dev, short="Verbraucher Leistung"))
             plus, minus = self._sum_coef([self._rest_coef(u["meter"], u["kids"])], u["name"])
             sid = (self.nodes[u["node"]]["sonstiges_id"] if u["node"] else None) or f"{u['id']}_sonstiges_leistung"
             out.append(SensorDef(sid, f"{np}{u['name']} Sonstiges Leistung", "rest", plus, minus,
-                                 node=u["node"], attrs=meta(u, steckdose=u["meter"])))
+                                 node=u["node"], attrs=meta(u, steckdose=u["meter"]),
+                                 device=dev, short="Sonstiges Leistung"))
 
         # Ungemessene Knoten mit gemessenen Nachfahren: Summe (für Fluss und Sankey)
         for nid, n in self.nodes.items():
@@ -448,14 +457,18 @@ class Netz:
                 oid, name = f"phase_{key.lower()}_leistung", f"Phase {key}"
                 extra = {"phase": key}
             plus, minus = self._sum_coef([self._rest_coef(u["meter"], u["kids"]) for u in us], name)
+            topf = ({"kind": "topf", "key": key, "name": name, "area": key if key in self.areas else None}
+                    if art == "raum" else None)
             out.append(SensorDef(oid, f"{np}{name} Leistung", "gruppe", plus, minus,
-                                 attrs={"gruppe": art, **extra, "plus": plus, "minus": minus}))
+                                 attrs={"gruppe": art, **extra, "plus": plus, "minus": minus},
+                                 device=topf, short="Leistung" if topf else None))
             if art == "raum":
                 with_kids = [u for u in us if u["kids"]]
                 if with_kids:
                     plus, minus = self._sum_coef([self._rest_coef(u["meter"], u["kids"]) for u in with_kids], name)
                     out.append(SensorDef(f"{key}_sonstiges_leistung", f"{np}{name} Sonstiges Leistung", "gruppe",
-                                         plus, minus, attrs={"gruppe": "raum_sonstiges", **extra}))
+                                         plus, minus, attrs={"gruppe": "raum_sonstiges", **extra},
+                                         device=topf, short="Sonstiges Leistung"))
         keys = [s.key for s in out]
         dup = sorted({k for k in keys if keys.count(k) > 1})
         if dup:

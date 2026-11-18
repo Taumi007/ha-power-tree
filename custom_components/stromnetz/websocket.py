@@ -111,7 +111,16 @@ def ws_export(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], {"yaml": text})
 
 
+@websocket_api.websocket_command({vol.Required("type"): "stromnetz/shelly"})
+@callback
+def ws_shelly(hass: HomeAssistant, connection, msg) -> None:
+    """Shelly-Geräte aus HA mit Kanälen (Schalter, Leistung) und noch nicht eingerichtete Funde."""
+    from .shelly import discovered, shelly_devices
+
+    connection.send_result(msg["id"], {"devices": shelly_devices(hass), "discovered": discovered(hass)})
+
+
 @callback
 def async_register_commands(hass: HomeAssistant) -> None:
-    for cmd in (ws_get, ws_validate, ws_save, ws_export):
+    for cmd in (ws_get, ws_validate, ws_save, ws_export, ws_shelly):
         websocket_api.async_register_command(hass, cmd)

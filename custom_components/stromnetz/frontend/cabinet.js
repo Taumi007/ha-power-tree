@@ -102,7 +102,12 @@ export class CabinetView {
     if (!this.current || !net.cabinets.has(this.current)) this.current = cabs[0]?.id ?? null;
     this.live = [];
     const tabs = h("div", { class: "cab-tabs" },
-      ...cabs.map((c) => h("button", { class: `chip${c.id === this.current ? " active" : ""}`, onclick: () => { this.current = c.id; this.render(); } },
+      ...cabs.map((c) => h("button", { class: `chip${c.id === this.current ? " active" : ""}`, onclick: () => {
+        this.current = c.id;
+        // Ist das Kasten-Formular offen, wechselt es mit
+        if (this.p.selection?.type === "cabinet" && this.p.selection.id !== c.id) this.p.select({ type: "cabinet", id: c.id });
+        else this.render();
+      } },
         `${c.code} · ${c.name}`)),
       this.p.editing ? h("button", { class: "chip dashed", onclick: () => this.p.addCabinet() }, "+ Kasten") : null);
     if (!this.current) {

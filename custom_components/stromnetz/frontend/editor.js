@@ -22,6 +22,7 @@ export class Editor {
       return;
     }
     this.el.classList.add("open");
+    this.lastKey = `${target.type}:${target.id ?? ""}`;
     const body = { node: () => this.node(target.id), module: () => this.module(target.id),
                    cabinet: () => this.cabinet(target.id), grid: () => this.grid() }[target.type]?.();
     this.el.replaceChildren(
@@ -35,6 +36,29 @@ export class Editor {
     const flash = this.el.querySelector(".srow.flash");
     if (flash) flash.scrollIntoView({ block: "nearest" });
     this.updateValues();
+  }
+
+  // Scrollposition, Fokus und Cursor merken, um sie nach dem Neuzeichnen desselben Formulars wiederherzustellen
+  snapshot() {
+    if (!this.el.classList.contains("open")) return null;
+    const focusables = [...this.el.querySelectorAll("input, select, textarea, button")];
+    const active = this.p.shadowRoot.activeElement;
+    const idx = active ? focusables.indexOf(active) : -1;
+    return {
+      key: this.lastKey, scroll: this.el.scrollTop, idx,
+      sel: idx >= 0 && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null,
+    };
+  }
+
+  restore(st) {
+    if (!st || st.key !== this.lastKey) return;
+    this.el.scrollTop = st.scroll;
+    if (st.idx < 0) return;
+    const el = [...this.el.querySelectorAll("input, select, textarea, button")][st.idx];
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (st.sel && "setSelectionRange" in el) try { el.setSelectionRange(...st.sel); } catch { /* Feldtyp ohne Cursor */ }
+    this.el.scrollTop = st.scroll;
   }
 
   updateValues() {
@@ -140,8 +164,108 @@ export class Editor {
   addMenu(e, parent) {
     this.p.menu(e.clientX, e.clientY,
       [["outlet", "Steckdose", MDI.outlet], ["junction", "Abzweig / Dose", MDI.junction], ["fixed", "Festanschluss / Leuchte", MDI.lamp], ["appliance", "Gerät", MDI.power]]
-        .map(([kind, label, ic]) => ({ label, icon: ic, action: () => this.p.addNode(parent, kind, { stay: true }) })),
+        .map(([kind, label, ic]) => ({ label, icon: ic, action: () => this.p.addNode(parent, kind, { stay: true }) }))
+        .concat(["-", { label: "Shelly Unterputz / Stecker …", icon: MDI.toggle, action: () => this.p.openFlushPicker(parent) }]),
       `Hinter ${this.net.address(parent)} anlegen`);
+  }
+
+  // ── Shelly ────────────────────────────────────────────────────────────────
+  shellyRefreshBtn() {
+    return h("button", { class: "icon-btn small", title: "Shelly-Liste neu aus HA laden", "aria-label": "Shelly-Liste aktualisieren",
+      onclick: async (e) => { e.preventDefault(); await this.p.loadShelly(true); this.p.renderView(); this.p.toast(`${this.p.shelly.devices.length} Shelly-Geräte geladen.`); } },
+      icon("M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z", 16));
+  }
+
+  shellyReady() {
+    if (this.p.shelly && Date.now() - this.p.shelly.t < 600000) return true;
+    if (this.p.shelly && !this._shellyLoading) {
+      // Veraltet: im Hintergrund neu laden, bis dahin die alte Liste zeigen
+      this._shellyLoading = true;
+      this.p.loadShelly(true).then(() => { this._shellyLoading = false; this.p.renderView(); });
+      return true;
+    }
+    if (!this._shellyLoading) {
+      this._shellyLoading = true;
+      this.p.loadShelly().then(() => { this._shellyLoading = false; this.p.renderView(); });
+    }
+    return false;
+  }
+
+  deviceOptions(current, preferModel) {
+    const sh = this.p.shelly;
+    const norm = (x) => (x ?? "").toLowerCase().replace(/\s*(gen\s*\d|plus|v\d)\b/g, "").replace(/\s+/g, " ").trim();
+    const want = norm(preferModel);
+    const label = (d) => {
+      const use = this.p.deviceUse(d.device_id);
+      const area = d.area_id ? this.net.areaName(d.area_id) : null;
+      return `${area ? `${area} · ` : ""}${d.name} · ${d.model ?? "?"} · ${d.channels.length} Kan.${use && d.device_id !== current ? ` (bei ${use.label})` : ""}`;
+    };
+    const coll = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+    const areaKey = (d) => (d.area_id ? this.net.areaName(d.area_id) : "~");
+    const sorted = sh.devices.slice().sort((a, b) => coll.compare(areaKey(a), areaKey(b)) || coll.compare(a.name ?? "", b.name ?? ""));
+    const match = sorted.filter((d) => want && norm(d.model) === want);
+    const rest = sorted.filter((d) => !match.includes(d));
+    const opt = (d) => h("option", { value: d.device_id, selected: d.device_id === current }, label(d));
+    return [h("option", { value: "" }, "— nicht verknüpft —"),
+      match.length ? h("optgroup", { label: `Passend: ${preferModel}` }, ...match.map(opt)) : null,
+      h("optgroup", { label: "Alle Shelly-Geräte" }, ...rest.map(opt))].filter(Boolean);
+  }
+
+  shellyModuleField(m, nodes) {
+    if (!this.shellyReady()) return this.field("Shelly-Gerät", h("span", { class: "muted small" }, "Lade Shelly-Geräte …"));
+    const sh = this.p.shelly;
+    if (!sh.devices.length) return null;
+    const sel = h("select", {}, ...this.deviceOptions(m.device, m.model));
+    sel.addEventListener("change", () => this.p.linkModuleDevice(m, sel.value || null));
+    const selRow = h("div", { class: "row" }, h("div", { class: "grow" }, sel), this.shellyRefreshBtn());
+    const dev = m.device ? sh.byId.get(m.device) : null;
+    // Vorschlag: Zähler/Schalter eines Kanals gehört schon zu einem Shelly
+    const hit = !m.device ? nodes.map((n) => sh.byEntity.get(n.meter) ?? sh.byEntity.get(n.switch)).find(Boolean) : null;
+    return h("div", { class: "field" }, h("span", { class: "flabel" }, "Shelly-Gerät"), selRow,
+      dev ? h("div", { class: "shelly-hint" }, `${dev.model ?? ""}${dev.model_id ? ` (${dev.model_id})` : ""} · ${dev.channels.length} Kanäle`,
+        h("button", { class: "chip", onclick: () => this.p.navigateHA(`/config/devices/device/${dev.device_id}`) }, icon(MDI.link, 16), " In HA")) : null,
+      hit ? h("div", { class: "shelly-hint" }, `Die Zähler gehören zu »${hit.dev.name}« (${hit.dev.model}).`,
+        h("button", { class: "chip", onclick: () => this.p.linkModuleDevice(m, hit.dev.device_id) }, "Verknüpfen")) : null);
+  }
+
+  shellyNodeHint(n, dev) {
+    return h("div", { class: "field" }, h("span", { class: "flabel" }, "Shelly-Gerät"),
+      h("div", { class: "shelly-hint" }, `Zähler/Schalter gehören zu »${dev.name}« (${dev.model}).`,
+        h("button", { class: "chip", onclick: () => this.p.linkNodeDevice(n, dev.device_id, dev.channels.length > 1 ? dev.channels[0].index : null) }, "Verknüpfen")));
+  }
+
+  shellyNodeField(n) {
+    // Kanal eines Hutschienengeräts: dasselbe Feld wie im Geräte-Formular (verknüpft alle Kanäle)
+    if (n.module) {
+      const m = this.net.modules.get(n.module);
+      if (!m || !(["relay", "meter", "other"].includes(m.type) || m.device || /shelly/i.test(m.model ?? ""))) return null;
+      return this.shellyModuleField(m, this.net.moduleNodes.get(m.id) ?? []);
+    }
+    const isDeviceish = n.model || n.device || ["relay", "junction", "outlet", "appliance", "fixed"].includes(n.kind);
+    if (!isDeviceish) return null;
+    if (!this.shellyReady()) return null;
+    const sh = this.p.shelly;
+    const hit = !n.device ? (sh.byEntity.get(n.meter) ?? sh.byEntity.get(n.switch)) : null;
+    if (!n.device && !hit) {
+      const dev = sh.devices.find((d) => (d.entities ?? []).includes(n.meter) || (d.entities ?? []).includes(n.switch));
+      if (dev) return this.shellyNodeHint(n, dev);
+    }
+    if (!n.device && !n.model && !hit) return null; // normale Knoten ohne Shelly-Bezug nicht zumüllen
+    const sel = h("select", {}, ...this.deviceOptions(n.device, n.model));
+    sel.addEventListener("change", () => this.p.linkNodeDevice(n, sel.value || null));
+    const dev = n.device ? sh.byId.get(n.device) : null;
+    const hasChannelKids = this.net.kids(n.id).some((k) => this.net.nodes.get(k).channel);
+    let chSel = null;
+    if (dev && dev.channels.length > 1 && !hasChannelKids) {
+      chSel = h("select", {}, ...dev.channels.map((c) => h("option", { value: c.index, selected: n.device_channel === c.index }, `Kanal ${c.index + 1}${c.name ? ` · ${c.name}` : ""}`)));
+      chSel.addEventListener("change", () => this.p.linkNodeDevice(n, dev.device_id, Number(chSel.value)));
+    }
+    return h("div", { class: "field" }, h("span", { class: "flabel" }, "Shelly-Gerät"),
+      h("div", { class: "row" }, h("div", { class: "grow" }, sel), chSel, this.shellyRefreshBtn()),
+      dev ? h("div", { class: "shelly-hint" }, `${dev.model ?? ""} · ${dev.channels.length} ${dev.channels.length > 1 ? "Kanäle" : "Kanal"}`,
+        h("button", { class: "chip", onclick: () => this.p.navigateHA(`/config/devices/device/${dev.device_id}`) }, icon(MDI.link, 16), " In HA")) : null,
+      hit ? h("div", { class: "shelly-hint" }, `Gehört zu »${hit.dev.name}« (${hit.dev.model}), Kanal ${hit.ch.index + 1}.`,
+        h("button", { class: "chip", onclick: () => this.p.linkNodeDevice(n, hit.dev.device_id, hit.dev.channels.length > 1 ? hit.ch.index : null) }, "Verknüpfen")) : null);
   }
 
   // ── Feld-Bausteine ────────────────────────────────────────────────────────
@@ -161,7 +285,7 @@ export class Editor {
       let v = inp.value.trim();
       if (transform) v = transform(v);
       obj[key] = v === "" ? null : v;
-      this.p.changed();
+      this.p.changed({ deferred: true });
     });
     return this.field(label, inp, hint);
   }
@@ -170,7 +294,7 @@ export class Editor {
     const inp = h("input", { type: "number", value: obj[key] === null || obj[key] === undefined ? "" : obj[key] + offset, min, max, placeholder: placeholder ?? "" });
     inp.addEventListener("change", () => {
       obj[key] = inp.value === "" ? null : Number(inp.value) - offset;
-      this.p.changed();
+      this.p.changed({ deferred: true });
     });
     return this.field(label, inp, hint);
   }
@@ -180,7 +304,7 @@ export class Editor {
     sel.addEventListener("change", () => {
       obj[key] = sel.value === "" ? null : sel.value;
       onchange?.(obj[key]);
-      this.p.changed();
+      this.p.changed({ deferred: true });
     });
     return this.field(label, sel, hint);
   }
@@ -189,7 +313,7 @@ export class Editor {
     const inp = h("input", { type: "checkbox", checked: !!obj[key] });
     inp.addEventListener("change", () => {
       obj[key] = inp.checked;
-      this.p.changed();
+      this.p.changed({ deferred: true });
     });
     return h("label", { class: "field check" }, inp, h("span", {}, label));
   }
@@ -200,7 +324,7 @@ export class Editor {
       const active = (obj[key] ?? null) === v;
       wrap.append(h("button", {
         class: active ? "active" : "", style: active && color ? { background: color, color: "#fff" } : {},
-        onclick: (e) => { e.preventDefault(); obj[key] = v; this.p.changed(); },
+        onclick: (e) => { e.preventDefault(); obj[key] = v; this.p.changed({ deferred: true }); },
       }, l));
     }
     return this.field(label, wrap, obj[key] === null && inherited ? `erbt: ${inherited}` : null);
@@ -241,6 +365,7 @@ export class Editor {
       this.text("Name", n, "name", { placeholder: n.meter ? net.name(id, this.p.hass) : "" }),
       this.select("Art", n, "kind", Object.entries(KIND_LABEL)),
       this.meterField(n),
+      this.shellyNodeField(n),
       ["relay", "outlet", "appliance", "fixed"].includes(n.kind) || n.switch
         ? this.text("Schalter", n, "switch", { list: "sn-switch", placeholder: "switch.…" }) : null,
       this.select("Area / Topf", n, "area", this.areaOptions(parentArea)),
@@ -287,7 +412,7 @@ export class Editor {
         return;
       }
       n.meter = v;
-      this.p.changed();
+      this.p.changed({ deferred: true });
     });
     return this.field("Zähler (Leistung)", inp);
   }
@@ -337,6 +462,7 @@ export class Editor {
         isRcd ? this.number("Nennstrom (A)", m, "rating", { min: 1, placeholder: "offen" }) : h("span"),
         this.number("Fehlerstrom (mA)", m, "rcd_ma", { min: 10 })) : null,
       nodes.length ? this.uplinkField(m, nodes) : null,
+      ["relay", "meter", "other"].includes(m.type) || m.device || /shelly/i.test(m.model ?? "") ? this.shellyModuleField(m, nodes) : null,
 
       h("div", { class: "channels" },
         h("div", { class: "sec-title" }, nodes.length > 1 ? `Kanäle (${nodes.length})` : nodes.length ? "Stromkreis" : "Kanäle"),
