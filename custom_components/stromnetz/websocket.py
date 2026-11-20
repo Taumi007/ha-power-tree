@@ -96,6 +96,7 @@ def _structure(data: dict) -> Any:
     """Alles, was Sensoren beeinflusst (ohne Positionen, Notizen, Einklappen)."""
     skip = {"pos", "collapsed", "notes"}
     return (data.get("settings", {}).get("prefix"), data.get("settings", {}).get("name_prefix"),
+            data.get("settings", {}).get("write_interval"),
             data.get("grid"), data.get("pots"), data.get("cabinets"), data.get("modules"),
             [{k: v for k, v in n.items() if k not in skip} for n in data.get("nodes", [])])
 

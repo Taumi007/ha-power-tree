@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import re
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -11,13 +12,15 @@ from homeassistant.core import Event, EventStateChangedData, HomeAssistant, call
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
 from . import StromnetzConfigEntry
 from .const import DOMAIN
 from .model import ModelError, SensorDef
 
 _LOGGER = logging.getLogger(__name__)
+# Änderungen kleiner als das schreiben wir nicht (W)
+DEADBAND = 0.5
 ROLE_ICON = {"rest": "mdi:help-circle-outline", "summe": "mdi:sigma", "verbraucher": "mdi:power-plug",
              "gruppe": "mdi:home-lightning-bolt-outline"}
 
@@ -69,14 +72,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: StromnetzConfigEntry,
             dev = dev_reg.async_update_device(dev.id, **changes)
         devices[ident] = (info, dev)
 
+    try:
+        interval = max(0.0, min(3600.0, float(runtime.data["settings"].get("write_interval", 30))))
+    except (TypeError, ValueError):
+        interval = 30.0
     entities = []
     for d in defs:
         if d.device:
             info, dev = devices[f"{entry.entry_id}_{d.device['kind']}_{d.device['key']}"]
             _migrate_entity_id(hass, ent_reg, d, dev, prefix)
-            entities.append(StromnetzSensor(d, prefix, info))
+            entities.append(StromnetzSensor(d, prefix, info, interval))
         else:
-            entities.append(StromnetzSensor(d, prefix, main))
+            entities.append(StromnetzSensor(d, prefix, main, interval))
 
     # Sensoren und Geräte, die es im Netz nicht mehr gibt, aus den Registries entfernen
     wanted = {e.unique_id for e in entities}
@@ -99,8 +106,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: StromnetzConfigEntry,
     def changed(event: Event[EventStateChangedData]) -> None:
         for ent in by_source.get(event.data["entity_id"], []):
             if ent.hass is not None:
-                ent.recalculate()
-                ent.async_write_ha_state()
+                ent.schedule_write()
 
     if by_source:
         entry.async_on_unload(async_track_state_change_event(hass, list(by_source), changed))
@@ -150,8 +156,13 @@ class StromnetzSensor(SensorEntity):
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_suggested_display_precision = 1
 
-    def __init__(self, definition: SensorDef, prefix: str, device: DeviceInfo) -> None:
+    def __init__(self, definition: SensorDef, prefix: str, device: DeviceInfo, interval: float = 30.0) -> None:
         self.definition = definition
+        # Schreibdrossel: höchstens ein Zustand je Intervall, der letzte Wert kommt immer an
+        self._interval = interval
+        self._last_write = 0.0
+        self._written: float | None = None
+        self._pending = None
         self._attr_unique_id = definition.key
         self._attr_icon = ROLE_ICON.get(definition.role)
         self._attr_device_info = device
@@ -167,6 +178,9 @@ class StromnetzSensor(SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         self.recalculate()
+        self._written = self._attr_native_value
+        self._last_write = time.monotonic()
+        self.async_on_remove(self._cancel_pending)
         dev = self.definition.device
         if dev and dev["kind"] == "topf" and dev["area"] and self.registry_entry \
                 and self.registry_entry.area_id is None:
@@ -181,6 +195,41 @@ class StromnetzSensor(SensorEntity):
             return float(st.state)
         except (TypeError, ValueError):
             return None
+
+    @callback
+    def _cancel_pending(self) -> None:
+        if self._pending:
+            self._pending()
+            self._pending = None
+
+    @callback
+    def schedule_write(self) -> None:
+        """Nach einer Quelländerung schreiben, aber höchstens einmal je Intervall."""
+        if self._pending:
+            return
+        wait = self._last_write + self._interval - time.monotonic()
+        if wait <= 0:
+            self._write()
+        else:
+            self._pending = async_call_later(self.hass, wait, self._delayed_write)
+
+    @callback
+    def _delayed_write(self, _now) -> None:
+        self._pending = None
+        self._write()
+
+    @callback
+    def _write(self) -> None:
+        self.recalculate()
+        new = self._attr_native_value
+        old = self._written
+        if new is not None and old is not None and abs(new - old) < DEADBAND:
+            return
+        if new is None and old is None:
+            return
+        self._written = new
+        self._last_write = time.monotonic()
+        self.async_write_ha_state()
 
     @callback
     def recalculate(self) -> None:

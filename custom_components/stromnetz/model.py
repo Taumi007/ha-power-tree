@@ -52,7 +52,8 @@ class ModelError(Exception):
 def empty() -> dict:
     return {
         "version": 1,
-        "settings": {"prefix": "stromnetz_", "name_prefix": "Stromnetz ", "colors": dict(DEFAULT_COLORS)},
+        "settings": {"prefix": "stromnetz_", "name_prefix": "Stromnetz ", "write_interval": 30,
+                     "colors": dict(DEFAULT_COLORS)},
         "grid": {"name": "Netzanschluss", "pot": None,
                  "phases": {p: {"id": f"netz_phase_{p.lower()}", "name": f"Hauszuleitung Phase {p}", "meter": None}
                             for p in PHASES}},

@@ -1501,7 +1501,9 @@ class StromnetzPanel extends HTMLElement {
         out),
       h("section", { class: "card-box" }, h("h3", {}, "Sensoren"),
         field("Präfix der entity_ids", s, "prefix", "Ändern legt alle Sensoren neu an (neue entity_ids)."),
-        field("Präfix der Namen", s, "name_prefix")),
+        field("Präfix der Namen", s, "name_prefix"),
+        field("Schreibintervall (Sekunden)", s, "write_interval",
+          "Höchstens ein neuer Wert je Sensor in diesem Abstand; der letzte Wert kommt immer an. Hält die HA-Datenbank klein. 0 = sofort.")),
       h("section", { class: "card-box" }, h("h3", {}, "Bilanz-Töpfe"),
         h("p", { class: "muted" }, "Gruppen ohne eigene HA-Area, z. B. »Klimaanlagen« oder »Nicht erfasst«."),
         ...pots.map(([k, v]) => {
