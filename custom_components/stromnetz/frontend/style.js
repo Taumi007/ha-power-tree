@@ -237,6 +237,12 @@ header { min-width: 0; overflow: hidden; }
 .pk-sw.none { background: transparent; box-shadow: inset 0 0 0 1px var(--sn-div); }
 .pk-foot { padding: 10px 20px; border-top: 1px solid var(--sn-div); font-size: 12px; }
 @media (max-width: 640px) { .pk-body { flex-direction: column; } .pk-cats { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--sn-div); } }
+/* Bestätigungsdialog */
+.picker.ask { z-index: 30; }
+.ask-dialog { width: min(440px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 16px; padding: 20px; background: var(--sn-card); border: 1px solid var(--sn-div); border-radius: 14px; box-shadow: 0 20px 48px rgba(0,0,0,.5); }
+.ask-msg { white-space: pre-line; line-height: 1.45; font-size: 14px; max-height: 50vh; overflow-y: auto; }
+.ask-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.btn.danger-fill { background: var(--error-color, #db4437); border-color: var(--error-color, #db4437); color: #fff; }
 /* Beschriftungsdialog */
 .lbl-dialog { height: min(620px, calc(100vh - 64px)); }
 .lbl-list { padding-top: 8px; }

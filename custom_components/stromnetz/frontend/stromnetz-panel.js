@@ -154,8 +154,36 @@ class StromnetzPanel extends HTMLElement {
     }
   }
 
-  discard() {
-    if (!this.dirty || !confirm("Alle ungespeicherten Änderungen verwerfen?")) return;
+  // Eigener Bestätigungsdialog: window.confirm/prompt werden von manchen Browsern und App-Ansichten
+  // unterdrückt (dann käme stillschweigend »Abbrechen« zurück)
+  ask(message, { ok = "OK", danger = false, input = null } = {}) {
+    return new Promise((resolve) => {
+      let field = null;
+      const done = (v) => {
+        this.askEl.classList.remove("open");
+        this.askEl.replaceChildren();
+        resolve(v);
+      };
+      const accept = () => done(field ? field.value.trim() || null : true);
+      const cancel = () => done(field ? null : false);
+      if (input) {
+        field = h("input", { placeholder: input.placeholder ?? "", value: input.value ?? "" });
+        field.addEventListener("keydown", (e) => { if (e.key === "Enter") accept(); });
+      }
+      const okBtn = h("button", { class: `btn ${danger ? "danger-fill" : "primary"}`, onclick: accept }, ok);
+      const dlg = h("div", { class: "ask-dialog", role: "alertdialog", "aria-modal": "true", onclick: (e) => e.stopPropagation() },
+        h("div", { class: "ask-msg" }, message), field,
+        h("div", { class: "ask-btns" }, h("button", { class: "btn", onclick: cancel }, "Abbrechen"), okBtn));
+      dlg.addEventListener("keydown", (e) => { if (e.key === "Escape") cancel(); });
+      this.askEl.onclick = cancel;
+      this.askEl.replaceChildren(dlg);
+      this.askEl.classList.add("open");
+      (field ?? okBtn).focus();
+    });
+  }
+
+  async discard() {
+    if (!this.dirty || !(await this.ask("Alle ungespeicherten Änderungen verwerfen?", { ok: "Verwerfen", danger: true }))) return;
     this.data = clone(this.desc.data);
     this.dirty = false;
     this.selection = null;
@@ -191,6 +219,7 @@ class StromnetzPanel extends HTMLElement {
     this.toastEl = h("div", { class: "toast" });
     this.lists = h("div", { hidden: true });
     this.pickerEl = h("div", { class: "picker", onclick: () => this.closePicker() });
+    this.askEl = h("div", { class: "picker ask" });
     const menuBtn = h("button", { class: "icon-btn menu-btn", "aria-label": "Seitenleiste", onclick: () => this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true })) },
       icon("M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"));
     const header = this.header = h("header", {},
@@ -202,7 +231,7 @@ class StromnetzPanel extends HTMLElement {
       this.searchBtn,
       h("label", { class: "search" }, icon("M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z", 16), this.search),
       this.status, this.editBtn, this.discardBtn, this.saveBtn);
-    this.shadowRoot.append(style, header, this.banner, this.main, this.menuEl, this.pickerEl, this.toastEl, this.lists);
+    this.shadowRoot.append(style, header, this.banner, this.main, this.menuEl, this.pickerEl, this.askEl, this.toastEl, this.lists);
     this.shadowRoot.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         this.closeMenu();
@@ -560,13 +589,13 @@ class StromnetzPanel extends HTMLElement {
     this.toast(`»${this.net.name(ex.id, this.hass)}« verschoben (vorher an ${oldPlace}).`);
   }
 
-  removeNode(id) {
+  async removeNode(id) {
     const net = this.net;
     const doomed = new Set([id]);
     const walk = (k) => net.kids(k).forEach((c) => { doomed.add(c); walk(c); });
     walk(id);
     const extra = doomed.size > 1 ? ` und ${doomed.size - 1} Abgänge darunter` : "";
-    if (!confirm(`»${net.name(id, this.hass)}«${extra} entfernen?`)) return;
+    if (!(await this.ask(`»${net.name(id, this.hass)}«${extra} entfernen?`, { ok: "Entfernen", danger: true }))) return;
     this.data.nodes = this.data.nodes.filter((n) => !doomed.has(n.id));
     for (const c of this.data.cabinets) if (doomed.has(c.feed)) c.feed = null;
     this.selection = null;
@@ -817,7 +846,7 @@ class StromnetzPanel extends HTMLElement {
     btn.title = `${this.hass?.states[entity]?.attributes?.friendly_name ?? entity}: ${st === "on" ? "an" : st === "off" ? "aus" : st ?? "?"}`;
   }
 
-  confirmToggle(n) {
+  async confirmToggle(n) {
     const st = this.hass.states[n.switch];
     if (!st || st.state === "unavailable" || st.state === "unknown") {
       this.toast(`${n.switch} ist nicht erreichbar.`);
@@ -826,7 +855,7 @@ class StromnetzPanel extends HTMLElement {
     const target = st.state === "on" ? "ausschalten" : "einschalten";
     const name = st.attributes.friendly_name ?? n.switch;
     const where = `${this.net.address(n.id)} ${this.net.name(n.id, this.hass)}`;
-    if (!confirm(`»${name}« ${target}?\n\n${where}\n${n.switch}`)) return;
+    if (!(await this.ask(`»${name}« ${target}?\n\n${where}\n${n.switch}`, { ok: target.charAt(0).toUpperCase() + target.slice(1) }))) return;
     this.hass.callService("homeassistant", st.state === "on" ? "turn_off" : "turn_on", { entity_id: n.switch });
   }
 
@@ -986,7 +1015,7 @@ class StromnetzPanel extends HTMLElement {
   }
 
   // Kanäle (Knoten) mit den Entities eines Shelly-Geräts belegen. targets: [{node, index}]
-  applyDevice(dev, targets) {
+  async applyDevice(dev, targets) {
     const conflicts = [];
     for (const { node, index } of targets) {
       const ch = dev.channels.find((c) => c.index === index);
@@ -994,7 +1023,7 @@ class StromnetzPanel extends HTMLElement {
       if (node.switch && ch.switch && node.switch !== ch.switch) conflicts.push(`${node.switch} → ${ch.switch}`);
       if (node.meter && ch.power && node.meter !== ch.power) conflicts.push(`${node.meter} → ${ch.power}`);
     }
-    if (conflicts.length && !confirm(`Vorhandene Einträge überschreiben?\n\n${conflicts.join("\n")}`)) return false;
+    if (conflicts.length && !(await this.ask(`Vorhandene Einträge überschreiben?\n\n${conflicts.join("\n")}`, { ok: "Überschreiben" }))) return false;
     const used = new Set(this.data.nodes.filter((n) => !targets.some((t) => t.node === n)).map((n) => n.meter).filter(Boolean));
     for (const { node, index } of targets) {
       const ch = dev.channels.find((c) => c.index === index);
@@ -1007,7 +1036,7 @@ class StromnetzPanel extends HTMLElement {
     return true;
   }
 
-  linkModuleDevice(m, devId) {
+  async linkModuleDevice(m, devId) {
     if (m.mount) {
       const dev = devId ? this.shelly?.byId.get(devId) : null;
       if (devId && !dev) return;
@@ -1030,14 +1059,14 @@ class StromnetzPanel extends HTMLElement {
     const dev = this.shelly?.byId.get(devId);
     if (!dev) return;
     const other = this.deviceUse(devId);
-    if (other && !(other.type === "module" && other.id === m.id) && !confirm(`${dev.name} ist schon bei ${other.label} zugeordnet. Trotzdem hier verknüpfen?`)) return;
+    if (other && !(other.type === "module" && other.id === m.id) && !(await this.ask(`${dev.name} ist schon bei ${other.label} zugeordnet. Trotzdem hier verknüpfen?`, { ok: "Verknüpfen" }))) return;
     while ((this.net.moduleNodes.get(m.id) ?? []).length < dev.channels.length) {
       this.addChannel(m.id, { silent: true });
       this.net = new Net(this.data, this.desc);
     }
     const nodes = (this.net.moduleNodes.get(m.id) ?? []).slice().sort((a, b) => (a.channel ?? 0) - (b.channel ?? 0));
     const targets = dev.channels.map((c, i) => ({ node: nodes[i], index: c.index })).filter((t) => t.node);
-    if (!this.applyDevice(dev, targets)) return;
+    if (!(await this.applyDevice(dev, targets))) return;
     m.device = devId;
     if (!m.model) m.model = dev.model;
     this.changed();
@@ -1045,7 +1074,7 @@ class StromnetzPanel extends HTMLElement {
   }
 
   // Knoten (z. B. Unterputz-Shelly) mit einem HA-Gerät verknüpfen; mehrkanalig über die Kinder mit Kanalnummer
-  linkNodeDevice(n, devId, chIndex = null) {
+  async linkNodeDevice(n, devId, chIndex = null) {
     if (!devId) {
       n.device = null;
       n.device_channel = null;
@@ -1058,7 +1087,7 @@ class StromnetzPanel extends HTMLElement {
     let targets;
     if (kids.length && chIndex === null) targets = kids.map((k) => ({ node: k, index: dev.channels[k.channel - 1]?.index ?? k.channel - 1 }));
     else targets = [{ node: n, index: chIndex ?? dev.channels[0]?.index ?? 0 }];
-    if (!this.applyDevice(dev, targets)) return;
+    if (!(await this.applyDevice(dev, targets))) return;
     n.device = devId;
     n.device_channel = kids.length && chIndex === null ? null : targets[0].index;
     if (!n.model) n.model = dev.model;
@@ -1339,11 +1368,11 @@ class StromnetzPanel extends HTMLElement {
   }
 
   // Gerät ist an einem Knoten verknüpft, ein anderer Knoten trägt aber dessen Zähler: zusammenführen
-  mergeDuplicate(dev, linkedId, existing) {
+  async mergeDuplicate(dev, linkedId, existing) {
     const dup = this.net.nodes.get(linkedId);
     const keep = existing[0].node;
     const kids = this.net.kids(dup.id).length;
-    if (!confirm(`»${this.net.name(dup.id, this.hass)}« (${this.net.address(dup.id)}) und »${this.net.name(keep.id, this.hass)}« (${this.net.address(keep.id)}) sind dasselbe Gerät.\n\nDen vorhandenen Knoten behalten und mit ${dev.name} verknüpfen, den doppelten entfernen?${kids ? `\n${kids} Abgänge des doppelten Knotens werden an seine Stelle gehängt.` : ""}`)) return;
+    if (!(await this.ask(`»${this.net.name(dup.id, this.hass)}« (${this.net.address(dup.id)}) und »${this.net.name(keep.id, this.hass)}« (${this.net.address(keep.id)}) sind dasselbe Gerät.\n\nDen vorhandenen Knoten behalten und mit ${dev.name} verknüpfen, den doppelten entfernen?${kids ? `\n${kids} Abgänge des doppelten Knotens werden an seine Stelle gehängt.` : ""}`, { ok: "Zusammenführen" }))) return;
     this.dissolveNodes([dup.id]);
     this.net = new Net(this.data, this.desc);
     for (const e of existing) {
@@ -1351,19 +1380,19 @@ class StromnetzPanel extends HTMLElement {
       e.node.device_channel = dev.channels.length > 1 ? e.index : null;
       if (!e.node.model) e.node.model = dev.model;
     }
-    this.applyDevice(dev, existing);
+    await this.applyDevice(dev, existing);
     this.selection = { type: "node", id: keep.id };
     this.changed();
     this.toast(`Zusammengeführt: ${this.net.name(keep.id, this.hass)} ist jetzt mit ${dev.name} verknüpft.`);
   }
 
-  linkExisting(dev, existing) {
+  async linkExisting(dev, existing) {
     const mods = new Set(existing.map((e) => e.node.module).filter(Boolean));
     if (mods.size === 1 && existing.every((e) => e.node.module)) {
       this.linkModuleDevice(this.net.modules.get([...mods][0]), dev.device_id);
       return;
     }
-    if (!this.applyDevice(dev, existing)) return;
+    if (!(await this.applyDevice(dev, existing))) return;
     for (const e of existing) {
       e.node.device = dev.device_id;
       e.node.device_channel = dev.channels.length > 1 ? e.index : null;
@@ -1445,11 +1474,11 @@ class StromnetzPanel extends HTMLElement {
     return moved;
   }
 
-  removeModule(mid) {
+  async removeModule(mid) {
     const nodes = this.net.moduleNodes.get(mid) ?? [];
     const m = this.net.modules.get(mid);
     if (m?.mount) {
-      if (!confirm(`Anbaugerät ${this.net.moduleTitle(m)} entfernen? Die Geräte darunter verlieren seine Zähler.`)) return;
+      if (!(await this.ask(`Anbaugerät ${this.net.moduleTitle(m)} entfernen? Die Geräte darunter verlieren seine Zähler.`, { ok: "Entfernen", danger: true }))) return;
       this.data.modules = this.data.modules.filter((x) => x.id !== mid);
       this.selection = null;
       this.changed();
@@ -1461,7 +1490,7 @@ class StromnetzPanel extends HTMLElement {
     const msg = [`Gerät ${this.net.moduleTitle(m)} mit ${nodes.length} Kanal/Kanälen entfernen?`,
       behind ? `${behind} Abgänge dahinter werden an die vorherige Stelle gehängt.` : null,
       feeds.length ? `Achtung: ${feeds.join(", ")} wird davon gespeist und hängt danach an der Hauszuleitung.` : null].filter(Boolean).join("\n\n");
-    if (!confirm(msg)) return;
+    if (!(await this.ask(msg, { ok: "Entfernen", danger: true }))) return;
     this.dissolveNodes([...ids]);
     for (const x of this.data.modules) if (x.rcd === mid) x.rcd = null;
     this.data.modules = this.data.modules.filter((x) => x.id !== mid);
@@ -1476,13 +1505,13 @@ class StromnetzPanel extends HTMLElement {
       && (["rcd", "relay"].includes(n.kind) || (["breaker", "junction"].includes(n.kind) && codes.some((c) => n.id.startsWith(c)))));
   }
 
-  cleanupOrphans() {
+  async cleanupOrphans() {
     const list = this.orphanChannels();
     if (!list.length) return;
     const behind = this.data.nodes.filter((n) => list.some((o) => o.id === n.parent));
     const msg = `${list.length} Reste entfernter Geräte löschen?\n\n${list.map((n) => `• ${this.net.address(n.id)} ${this.net.name(n.id, this.hass)}`).join("\n")}`
       + (behind.length ? `\n\n${behind.length} Abgänge dahinter (${behind.map((n) => this.net.name(n.id, this.hass)).join(", ")}) werden an die vorherige Stelle gehängt.` : "");
-    if (!confirm(msg)) return;
+    if (!(await this.ask(msg, { ok: "Entfernen", danger: true }))) return;
     this.dissolveNodes(list.map((n) => n.id));
     this.changed();
     this.toast(`${list.length} Reste entfernt – zum Übernehmen speichern.`);
@@ -1500,12 +1529,12 @@ class StromnetzPanel extends HTMLElement {
     this.render();
   }
 
-  removeCabinet(id) {
+  async removeCabinet(id) {
     if (this.data.modules.some((m) => m.cabinet === id)) {
       this.toast("Der Kasten enthält noch Geräte – erst entfernen oder umsetzen.");
       return;
     }
-    if (!confirm("Kasten entfernen?")) return;
+    if (!(await this.ask("Kasten entfernen?", { ok: "Entfernen", danger: true }))) return;
     this.data.cabinets = this.data.cabinets.filter((c) => c.id !== id);
     this.selection = null;
     this.changed();
@@ -1656,8 +1685,8 @@ class StromnetzPanel extends HTMLElement {
               this.changed();
             } }, icon(MDI.del, 16)));
         }),
-        h("button", { class: "chip", onclick: () => {
-          const name = prompt("Name des neuen Topfs");
+        h("button", { class: "chip", onclick: async () => {
+          const name = await this.ask("Name des neuen Topfs", { ok: "Anlegen", input: { placeholder: "z. B. Klimaanlagen" } });
           if (!name) return;
           this.data.pots[slug(name)] = { name, floor: null };
           this.changed();

@@ -406,9 +406,11 @@ export class Editor {
       if (other) {
         const where = other.parent && other.parent !== GRID ? `${net.address(other.parent)} ${net.name(other.parent, this.p.hass)}` : "Hauszuleitung";
         const msg = `${v} ist schon bei »${net.name(other.id, this.p.hass)}« (${net.address(other.id)}) eingetragen, hängt an: ${where}.\n\n`
-          + `OK: diesen bestehenden Knoten an die Stelle von »${net.name(n.id, this.p.hass)}« verschieben${this.p.isBlank(n) ? " (der neue, leere Knoten wird entfernt)" : ""}.\nAbbrechen: nichts ändern.`;
-        if (confirm(msg)) this.p.replaceWithExisting(n.id, other.id);
-        else inp.value = n.meter ?? "";
+          + `Verschieben: diesen bestehenden Knoten an die Stelle von »${net.name(n.id, this.p.hass)}« setzen${this.p.isBlank(n) ? " (der neue, leere Knoten wird entfernt)" : ""}.\nAbbrechen: nichts ändern.`;
+        this.p.ask(msg, { ok: "Verschieben" }).then((yes) => {
+          if (yes) this.p.replaceWithExisting(n.id, other.id);
+          else inp.value = n.meter ?? "";
+        });
         return;
       }
       n.meter = v;
