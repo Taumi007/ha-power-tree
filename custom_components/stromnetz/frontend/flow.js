@@ -405,22 +405,34 @@ export class FlowView {
     } else if (parent.type === "group") phase = parent.phase;
     else if (parent.type === "node") phase = net.phase(parent.id);
     else if (parent.type === "subcab") phase = net.phase(parent.parentId);
-    if (this.total && parent.type !== "grid") phase = null;
+    // Gesamt-Ansicht: neutral, solange der Ast mehrphasig ist; ab dem ersten einphasigen Knoten farbig
+    if (this.total && parent.type !== "grid") {
+      const single = (it) => it.type === "node" && !(it.ids?.length > 1);
+      phase = single(child) ? net.phase(child.id)
+        : child.type === "rest" && single(parent) ? net.phase(parent.id) : null;
+    }
     const x1 = parent.x + W, x2 = child.x, y2 = child.y + child.h / 2;
     const mx = Math.min(x1 + GAP / 2, x2 - 8);
     const colored = child.type === "group" || child.type === "subcab" || child.gridRest
       || (child.type === "node" && (["breaker", "unknown", "relay"].includes(net.nodes.get(child.id)?.kind) || net.nodes.get(child.id)?.module));
-    const path = svg("path", {
-      d: `M ${x1} ${y1} H ${mx} V ${y2} H ${x2}`,
-      fill: "none",
-      stroke: colored && phase ? this.phaseColor(phase) : NEUTRAL,
-      "stroke-width": 2,
-      "stroke-linejoin": "round",
-      "stroke-dasharray": child.type === "rest" ? "5 5" : child.loose ? "2 6" : null,
-      opacity: child.type === "rest" || child.loose ? 0.7 : 1,
-    });
-    this.edges.append(path);
-    this.live.push({ kind: "edge", el: path, get: () => this.itemValue(child) });
+    const line = (d, stroke) => {
+      const path = svg("path", {
+        d, fill: "none", stroke,
+        "stroke-width": 2,
+        "stroke-linejoin": "round",
+        "stroke-dasharray": child.type === "rest" ? "5 5" : child.loose ? "2 6" : null,
+        opacity: child.type === "rest" || child.loose ? 0.7 : 1,
+      });
+      this.edges.append(path);
+      this.live.push({ kind: "edge", el: path, get: () => this.itemValue(child) });
+    };
+    const color = colored && phase ? this.phaseColor(phase) : NEUTRAL;
+    // Gesamt-Ansicht: der gemeinsame Stamm eines mehrphasigen Knotens bleibt neutral,
+    // nur das Stück zum einphasigen Kind ist farbig
+    if (this.total && parent.type === "node" && parent.ids?.length > 1 && color !== NEUTRAL) {
+      line(`M ${x1} ${y1} H ${mx} V ${y2}`, NEUTRAL);
+      line(`M ${mx} ${y2} H ${x2}`, color);
+    } else line(`M ${x1} ${y1} H ${mx} V ${y2} H ${x2}`, color);
   }
 
   itemValue(it) {
@@ -507,7 +519,7 @@ export class FlowView {
     } else {
       const n = net.nodes.get(it.id);
       const merged = it.ids?.length > 1;
-      const phase = this.total ? null : net.phase(it.id);
+      const phase = merged ? null : net.phase(it.id);
       const v = h("span", { class: "val", style: (n.module || n.kind === "breaker") && phase ? { color: this.phaseColor(phase) } : {} });
       this.live.push({ kind: "text", el: v, get: () => this.itemValue(it) });
       const parent = n.parent && n.parent !== GRID ? n.parent : null;
