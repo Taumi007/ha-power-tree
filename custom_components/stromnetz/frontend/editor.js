@@ -505,8 +505,9 @@ export class Editor {
       const t = targets[i];
       const node = t?.node ? net.nodes.get(t.node) : null;
       const inp = h("input", { value: m.meters[i] ?? "", placeholder: "sensor.…_leistung", list: "sn-power" });
-      inp.addEventListener("change", () => {
+      inp.addEventListener("change", async () => {
         m.meters[i] = inp.value.trim() || null;
+        if (m.meters[i]) await this.p.adoptMountMeters(m);
         this.p.changed({ deferred: true });
       });
       const val = h("span", { class: "ch-val" });

@@ -643,8 +643,46 @@ class StromnetzPanel extends HTMLElement {
     return { m, nodes, placed: row !== null };
   }
 
+  // Hat das Gerät unter einem Anbaugerät schon eigene Zähler, fragen, ob sie ins Anbaugerät wandern
+  // (leerer Kanal) bzw. durch den Zähler des Anbaugeräts ersetzt werden (Kanal schon belegt)
+  async adoptMountMeters(m) {
+    const net = new Net(this.data, this.desc);
+    const moves = [], replaces = [];
+    for (const t of net.mountTargets({ ...m, meters: m.meters?.length ? m.meters : [null] })) {
+      const node = t.node ? this.data.nodes.find((n) => n.id === t.node) : null;
+      if (!node?.meter) continue;
+      if (!m.meters[t.channel]) moves.push({ t, node });
+      else if (m.meters[t.channel] !== node.meter) replaces.push({ t, node });
+    }
+    if (!moves.length && !replaces.length) return;
+    // Verknüpfter Shelly (am Gerät oder am Kanal) wandert mit den Zählern ins Anbaugerät
+    const devOf = ({ t, node }) => node.device || this.data.modules.find((x) => x.id === t.module)?.device || null;
+    const devName = (id) => this.shelly?.byId.get(id)?.name ?? "Shelly";
+    const line = (e) => `Kanal ${e.t.channel + 1} → ${net.address(e.node.id)} ${net.name(e.node.id, this.hass)}: ${e.node.meter}${devOf(e) ? ` (${devName(devOf(e))})` : ""}`;
+    const msg = [
+      moves.length ? `Die Geräte darunter haben schon eigene Zähler. In das Anbaugerät ${net.moduleTitle(m)} übernehmen?\n\n${moves.map(line).join("\n")}${moves.some(devOf) ? "\n\nDer verknüpfte Shelly wird ebenfalls ins Anbaugerät verschoben." : ""}` : null,
+      replaces.length ? `${moves.length ? "Außerdem" : "Die Geräte darunter haben eigene Zähler, die"} durch die Zähler des Anbaugeräts ersetzt werden${moves.length ? " sollen" : " können"}:\n\n${replaces.map(line).join("\n")}` : null,
+      "Übernehmen: Die Geräte darunter verwenden danach den Zähler des Anbaugeräts.",
+    ].filter(Boolean).join("\n\n");
+    if (!(await this.ask(msg, { ok: "Übernehmen" }))) return;
+    for (const { t, node } of moves) {
+      m.meters[t.channel] = node.meter;
+      node.meter = null;
+      const mod = this.data.modules.find((x) => x.id === t.module);
+      const dev = node.device || mod?.device;
+      if (dev && !m.device) {
+        m.device = dev;
+        const d = this.shelly?.byId.get(dev);
+        if (d?.model) m.model = d.model;
+      }
+      if (node.device) { node.device = null; node.device_channel = null; }
+      if (mod?.device) mod.device = null;
+    }
+    for (const { node } of replaces) node.meter = null;
+  }
+
   // Anbaugerät (über/unter einer Reihe): ohne eigene Knoten, je Kanal ein Zähler
-  createMount(cabId, item, at) {
+  async createMount(cabId, item, at) {
     const id = newId(`${cabId}_${item.key}`, new Set(this.data.modules.map((m) => m.id)));
     const m = { id, cabinet: cabId, row: at.row, slot: at.slot, width: item.width, type: "meter", label: this.nextLabel(cabId, "meter"),
       model: item.model ?? item.name, poles: item.channels, rating: null, curve: null, rcd: null, rcd_ma: null, notes: null, device: null,
@@ -652,6 +690,7 @@ class StromnetzPanel extends HTMLElement {
     this.data.modules.push(m);
     this.selection = { type: "module", id };
     this.closePicker();
+    await this.adoptMountMeters(m);
     this.changed();
   }
 
@@ -1047,6 +1086,7 @@ class StromnetzPanel extends HTMLElement {
         m.poles = n;
         if (!m.model) m.model = dev.model;
         this.toast(`${dev.name} verknüpft: ${dev.channels.length} Zähler übernommen.`);
+        await this.adoptMountMeters(m);
       }
       this.changed();
       return;
