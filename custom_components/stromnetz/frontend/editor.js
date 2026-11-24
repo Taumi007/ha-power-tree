@@ -1,5 +1,6 @@
 // Eigenschaften-Panel für Knoten, Hutschienengeräte, Kästen und den Netzanschluss
 import { GRID, KIND_LABEL, MDI, MODULE_TYPE_LABEL, PHASES, PHASES_N, PHASE_LABEL, fmtW, h, icon, num } from "./util.js";
+import { clampCode } from "./net.js";
 
 const CURVES = ["B", "C", "D", "K", "Z"];
 
@@ -508,7 +509,7 @@ export class Editor {
         const val = h("span", { class: "ch-val" });
         this.live.push({ el: val, get: () => num(hass, c.entity) });
         return h("div", { class: "clamp-line" },
-          h("b", {}, `Klemme ${c.name ?? i + 1}`),
+          h("b", {}, `${net.moduleTitle(m)}.${clampCode(m, i)}`),
           h("span", { class: "muted grow" }, c.entity ?? "ohne Entity"),
           placed
             ? h("button", { class: "chip", onclick: () => this.p.go({ type: "module", id: placed.id }) },

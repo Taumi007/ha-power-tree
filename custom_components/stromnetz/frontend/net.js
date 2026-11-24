@@ -5,6 +5,12 @@ import { GRID, PHASES, friendly, num } from "./util.js";
 // Modellnamen aus dem Katalog; andere Einträge im Modellfeld wurden bisher als Name benutzt
 const CATALOG_MODELS = new Set([...CATALOG_BY_KEY.values()].flatMap((i) => [i.model, i.name]).filter(Boolean));
 
+// Kurzzeichen einer CT-Klemme: CT1 … CT16, CTA/CTB/CTC
+export function clampCode(src, i) {
+  const name = src?.clamps?.[i]?.name ?? String((i ?? 0) + 1);
+  return `CT${String(name).replace(/\s+/g, "")}`;
+}
+
 export class Net {
   constructor(data, desc) {
     this.data = data;
@@ -147,6 +153,9 @@ export class Net {
   }
 
   moduleTitle(m) {
+    // CT-Klemme: Unterelement ihres Messgeräts (wie ein Kanal), egal in welchem Kasten sie sitzt
+    const src = m.source ? this.modules.get(m.source) : null;
+    if (src) return `${this.moduleTitle(src)}.${clampCode(src, m.clamp)}`;
     const cab = this.cabinets.get(m.cabinet);
     return `${cab?.code ?? "?"}-${m.label || m.id}`;
   }

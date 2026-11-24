@@ -2,7 +2,7 @@
 import { CabinetView } from "./cabinet.js";
 import { Editor } from "./editor.js";
 import { FlowView } from "./flow.js";
-import { Net } from "./net.js";
+import { Net, clampCode } from "./net.js";
 import { STYLE } from "./style.js";
 import { CATALOG, CATALOG_BY_KEY, catalogForDevice, dinVariant, itemWidth, ratingColor } from "./catalog.js";
 import { roomSankey } from "./sankey.js";
@@ -708,7 +708,7 @@ class StromnetzPanel extends HTMLElement {
     const freeList = free.length ? h("section", {}, h("h4", {}, "Freie CT-Klemmen"),
       ...free.map(({ src, c, i }) => h("button", { class: "pk-item", onclick: () => (okHere ? this.placeClamp(cabId, src, i, at) : this.toast("Dort ist kein Platz.")) },
         h("i", { class: "pk-sw none" }),
-        h("span", { class: "grow" }, h("b", {}, `${net.moduleTitle(src)} · Klemme ${c.name ?? i + 1}`), h("span", { class: "muted" }, ` · ${c.entity ?? "noch ohne Entity"}`)),
+        h("span", { class: "grow" }, h("b", {}, `${net.moduleTitle(src)}.${clampCode(src, i)}`), h("span", { class: "muted" }, ` · ${src.model ?? ""} · ${c.entity ?? "noch ohne Entity"}`)),
         h("span", { class: "muted" }, "1 TE")))) : null;
     const list = h("div", { class: "pk-list" }, freeList, free.length ? h("h4", {}, "Neues Anbaugerät") : null, ...items.map((it) => {
       const ok = net.fits(cabId, at.row, at.slot, it.width, null, at.mount);
@@ -828,7 +828,10 @@ class StromnetzPanel extends HTMLElement {
       m.clamps = work;
       if (devSel?.value) m.device = devSel.value;
       this.data.modules = this.data.modules.filter((x) => !lost.includes(x));
-      for (const x of this.clampMounts(m.id)) x.meters = [work[x.clamp]?.entity ?? null];
+      for (const x of this.clampMounts(m.id)) {
+        x.meters = [work[x.clamp]?.entity ?? null];
+        x.label = `${m.label ?? "P"}.${clampCode(m, x.clamp)}`;
+      }
       this.closePicker();
       this.changed();
       const free = work.filter((_, i) => !this.clampPlacement(m.id, i)).length;
@@ -856,8 +859,7 @@ class StromnetzPanel extends HTMLElement {
   async placeClamp(cabId, src, i, at) {
     const c = src.clamps[i];
     const id = newId(`${cabId}_ct_${slug(src.label ?? src.id)}_${slug(c.name ?? String(i + 1))}`, new Set(this.data.modules.map((x) => x.id)));
-    const srcCab = this.net.cabinets.get(src.cabinet);
-    const label = `${srcCab && src.cabinet !== cabId ? `${srcCab.code}-` : ""}${src.label ?? "P"}.${c.name ?? i + 1}`;
+    const label = `${src.label ?? "P"}.${clampCode(src, i)}`;
     const m = { id, cabinet: cabId, row: at.row, slot: at.slot, width: 1, type: "meter", label, model: `${src.model ?? "CT"} Klemme ${c.name ?? i + 1}`,
       poles: 1, rating: null, curve: null, rcd: null, rcd_ma: null, notes: null, device: null, mount: at.mount,
       meters: [c.entity ?? null], source: src.id, clamp: i };
