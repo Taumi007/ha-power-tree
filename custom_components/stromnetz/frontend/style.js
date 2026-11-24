@@ -243,6 +243,15 @@ header { min-width: 0; overflow: hidden; }
 .ask-msg { white-space: pre-line; line-height: 1.45; font-size: 14px; max-height: 50vh; overflow-y: auto; }
 .ask-btns { display: flex; justify-content: flex-end; gap: 8px; }
 .btn.danger-fill { background: var(--error-color, #db4437); border-color: var(--error-color, #db4437); color: #fff; }
+/* CT-Klemmen */
+.clamp-dialog { height: min(640px, calc(100vh - 64px)); }
+.clamp-top { display: flex; gap: 16px; align-items: flex-end; padding: 12px 20px; border-bottom: 1px solid var(--sn-div); flex-wrap: wrap; }
+.clamp-list { padding-top: 8px; }
+.clamp-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.clamp-row .grow { flex: 1; min-width: 0; }
+.clamp-line { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--sn-div); font-size: 13px; }
+.clamp-line .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warn { color: var(--warning-color, #ffa600); }
 /* Beschriftungsdialog */
 .lbl-dialog { height: min(620px, calc(100vh - 64px)); }
 .lbl-list { padding-top: 8px; }

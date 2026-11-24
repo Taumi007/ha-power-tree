@@ -622,6 +622,7 @@ class StromnetzPanel extends HTMLElement {
     const m = { id, cabinet: cabId, row, slot, width: item.width, type: item.type, label: this.nextLabel(cabId, item.type),
       model: item.model ?? (["relay", "meter", "other"].includes(item.type) ? item.name : null), poles: item.poles, rating: item.rating ?? null, curve: item.curve ?? null, rcd: null,
       rcd_ma: item.rcd_ma ?? null, notes: null };
+    if (item.clamps) m.clamps = item.clamps.map((name) => ({ name, entity: null }));
     this.data.modules.push(m);
     const ids = this.ids();
     const nodes = [];
@@ -699,7 +700,17 @@ class StromnetzPanel extends HTMLElement {
     const net = this.net;
     const cab = net.cabinets.get(cabId);
     const items = CATALOG.filter((c) => c.mount).flatMap((c) => c.groups.flatMap((g) => g.items));
-    const list = h("div", { class: "pk-list" }, ...items.map((it) => {
+    // Freie CT-Klemmen der Messgeräte: dieser Kasten zuerst
+    const sources = this.data.modules.filter((x) => x.clamps?.length)
+      .sort((a, b) => (a.cabinet === cabId ? 0 : 1) - (b.cabinet === cabId ? 0 : 1));
+    const free = sources.flatMap((src) => src.clamps.map((c, i) => ({ src, c, i })).filter(({ i }) => !this.clampPlacement(src.id, i)));
+    const okHere = net.fits(cabId, at.row, at.slot, 1, null, at.mount);
+    const freeList = free.length ? h("section", {}, h("h4", {}, "Freie CT-Klemmen"),
+      ...free.map(({ src, c, i }) => h("button", { class: "pk-item", onclick: () => (okHere ? this.placeClamp(cabId, src, i, at) : this.toast("Dort ist kein Platz.")) },
+        h("i", { class: "pk-sw none" }),
+        h("span", { class: "grow" }, h("b", {}, `${net.moduleTitle(src)} · Klemme ${c.name ?? i + 1}`), h("span", { class: "muted" }, ` · ${c.entity ?? "noch ohne Entity"}`)),
+        h("span", { class: "muted" }, "1 TE")))) : null;
+    const list = h("div", { class: "pk-list" }, freeList, free.length ? h("h4", {}, "Neues Anbaugerät") : null, ...items.map((it) => {
       const ok = net.fits(cabId, at.row, at.slot, it.width, null, at.mount);
       return h("button", { class: "pk-item", onclick: () => (ok ? this.createMount(cabId, it, at) : this.toast("Dort ist nicht genug Platz.")) },
         h("i", { class: "pk-sw none" }), h("span", { class: "grow" }, h("b", {}, it.name), h("span", { class: "muted" }, ` · ${it.sub}`)),
@@ -746,6 +757,114 @@ class StromnetzPanel extends HTMLElement {
     if (unplaced) this.toast(`${unplaced} Gerät(e) ohne freien Platz – liegen bei »Nicht platziert«.`);
     this.selection = { type: "module", id: first.id };
     this.closePicker();
+    this.changed();
+    if (first.clamps) setTimeout(() => this.openClampSetup(first.id));
+  }
+
+  // ── CT-Klemmen eines Messgeräts (Shelly Pro 3EM, Emporia Vue …) ──────────
+  clampMounts(srcId) {
+    return this.data.modules.filter((x) => x.mount && x.source === srcId);
+  }
+
+  clampPlacement(srcId, i) {
+    return this.clampMounts(srcId).find((x) => x.clamp === i) ?? null;
+  }
+
+  // Einrichtung: Anzahl, Name und Entity je Klemme; beim Shelly aus dem Gerät, beim Emporia von Hand
+  async openClampSetup(mid) {
+    this.closeMenu();
+    const m = this.data.modules.find((x) => x.id === mid);
+    if (!m) return;
+    const isShelly = /shelly/i.test(m.model ?? "");
+    if (isShelly && !this.shelly) {
+      // Erstes Laden der Shelly-Liste dauert einen Moment: Dialog sofort zeigen
+      this.pickerEl.replaceChildren(h("div", { class: "pk-dialog clamp-dialog", role: "dialog", onclick: (e) => e.stopPropagation() },
+        h("div", { class: "pk-head" }, h("b", {}, "CT-Klemmen einrichten"),
+          h("button", { class: "icon-btn", "aria-label": "Schließen", onclick: () => this.closePicker() }, icon(MDI.close))),
+        h("p", { class: "muted", style: { padding: "20px" } }, "Lade Shelly-Geräte …")));
+      this.pickerEl.classList.add("open");
+      await this.loadShelly?.();
+      if (!this.pickerEl.classList.contains("open")) return; // inzwischen geschlossen
+    }
+    const work = (m.clamps ?? []).map((c) => ({ ...c }));
+    const body = h("div", { class: "pk-list clamp-list" });
+    const count = h("input", { type: "number", min: "1", max: "32", value: String(work.length), style: { width: "80px" } });
+    const devSel = isShelly && this.shelly?.devices?.length ? h("select", {},
+      h("option", { value: "" }, "— Shelly-Gerät wählen —"),
+      ...this.shelly.devices.filter((d) => d.channels.length > 1 || /EM/i.test(d.model ?? ""))
+        .map((d) => h("option", { value: d.device_id, selected: d.device_id === m.device }, `${d.name} · ${d.model ?? ""}`))) : null;
+    const draw = () => {
+      body.replaceChildren(...work.map((c, i) => {
+        const name = h("input", { value: c.name ?? "", style: { width: "70px" } });
+        name.addEventListener("input", () => { c.name = name.value.trim() || String(i + 1); });
+        const ent = h("input", { value: c.entity ?? "", placeholder: "sensor.…_leistung", list: "sn-power", class: "grow" });
+        ent.addEventListener("change", () => { c.entity = ent.value.trim() || null; });
+        const placed = this.clampPlacement(m.id, i);
+        const where = placed ? `${this.net.moduleTitle(placed)} ${placed.mount === "top" ? "oben" : "unten"}` : "nicht platziert";
+        return h("div", { class: "clamp-row" }, h("span", { class: "muted" }, `Klemme`), name, ent, h("span", { class: `muted small${placed ? "" : " warn"}` }, where));
+      }));
+    };
+    const fillFromDevice = (devId) => {
+      const dev = devId ? this.shelly?.byId.get(devId) : null;
+      if (!dev) return;
+      dev.channels.forEach((ch, i) => {
+        if (!work[i]) work[i] = { name: String(i + 1), entity: null };
+        work[i].entity = ch.power ?? work[i].entity;
+      });
+      count.value = String(work.length);
+      draw();
+    };
+    devSel?.addEventListener("change", () => fillFromDevice(devSel.value));
+    count.addEventListener("change", () => {
+      const n = Math.max(1, Math.min(32, parseInt(count.value, 10) || 1));
+      while (work.length < n) work.push({ name: String(work.length + 1), entity: null });
+      work.length = n;
+      draw();
+    });
+    draw();
+    const save = async () => {
+      const lost = this.clampMounts(m.id).filter((x) => x.clamp >= work.length);
+      if (lost.length && !(await this.ask(`${lost.length} platzierte Klemme(n) gibt es danach nicht mehr und werden entfernt.`, { ok: "Übernehmen", danger: true }))) return;
+      m.clamps = work;
+      if (devSel?.value) m.device = devSel.value;
+      this.data.modules = this.data.modules.filter((x) => !lost.includes(x));
+      for (const x of this.clampMounts(m.id)) x.meters = [work[x.clamp]?.entity ?? null];
+      this.closePicker();
+      this.changed();
+      const free = work.filter((_, i) => !this.clampPlacement(m.id, i)).length;
+      if (free) this.toast(`${free} Klemme(n) frei: im Bearbeitungsmodus über oder unter dem gemessenen Gerät auf + tippen.`);
+    };
+    this.pickerEl.replaceChildren(h("div", { class: "pk-dialog clamp-dialog", role: "dialog", "aria-label": "CT-Klemmen einrichten", onclick: (e) => e.stopPropagation() },
+      h("div", { class: "pk-head" }, h("div", {}, h("b", {}, "CT-Klemmen einrichten"), h("span", { class: "muted" }, ` · ${this.net.moduleTitle(m)}${m.model ? ` · ${m.model}` : ""}`)),
+        h("button", { class: "icon-btn", "aria-label": "Schließen", onclick: () => this.closePicker() }, icon(MDI.close))),
+      h("div", { class: "clamp-top" },
+        h("label", { class: "lbl-num" }, h("span", {}, "Anzahl Klemmen"), count),
+        devSel ? h("label", { class: "lbl-num grow" }, h("span", {}, "Entities aus dem Shelly übernehmen"), devSel)
+          : h("p", { class: "muted small" }, isShelly ? "Keine Shelly-Geräte gefunden." : "Die Entities bitte je Klemme auswählen – die Namen beim Emporia sind nicht vorhersehbar.")),
+      h("div", { class: "pk-body" }, body),
+      h("div", { class: "pk-foot lbl-foot" }, h("span", { class: "muted" }, "Danach die Klemmen im Bearbeitungsmodus über/unter den gemessenen Geräten platzieren."),
+        h("button", { class: "btn primary", onclick: save }, "Übernehmen"))));
+    this.pickerEl.classList.add("open");
+    if (devSel && !m.device && !work.some((c) => c.entity)) {
+      const want = (m.model ?? "").toLowerCase();
+      const guess = this.shelly.devices.find((d) => (d.model ?? "").toLowerCase() === want && !this.data.modules.some((x) => x.device === d.device_id));
+      if (guess) { devSel.value = guess.device_id; fillFromDevice(guess.device_id); }
+    }
+  }
+
+  // Freie Klemme als Anbaugerät setzen
+  async placeClamp(cabId, src, i, at) {
+    const c = src.clamps[i];
+    const id = newId(`${cabId}_ct_${slug(src.label ?? src.id)}_${slug(c.name ?? String(i + 1))}`, new Set(this.data.modules.map((x) => x.id)));
+    const srcCab = this.net.cabinets.get(src.cabinet);
+    const label = `${srcCab && src.cabinet !== cabId ? `${srcCab.code}-` : ""}${src.label ?? "P"}.${c.name ?? i + 1}`;
+    const m = { id, cabinet: cabId, row: at.row, slot: at.slot, width: 1, type: "meter", label, model: `${src.model ?? "CT"} Klemme ${c.name ?? i + 1}`,
+      poles: 1, rating: null, curve: null, rcd: null, rcd_ma: null, notes: null, device: null, mount: at.mount,
+      meters: [c.entity ?? null], source: src.id, clamp: i };
+    this.data.modules.push(m);
+    this.selection = { type: "module", id };
+    this.closePicker();
+    await this.adoptMountMeters(m);
     this.changed();
   }
 
@@ -1527,13 +1646,15 @@ class StromnetzPanel extends HTMLElement {
     const ids = new Set(nodes.map((n) => n.id));
     const behind = this.data.nodes.filter((n) => ids.has(n.parent)).length;
     const feeds = this.data.cabinets.filter((c) => ids.has(c.feed)).map((c) => c.code);
-    const msg = [`Gerät ${this.net.moduleTitle(m)} mit ${nodes.length} Kanal/Kanälen entfernen?`,
+    const clampMods = this.clampMounts(mid);
+    const msg = [`Gerät ${this.net.moduleTitle(m)}${nodes.length ? ` mit ${nodes.length} Kanal/Kanälen` : ""} entfernen?`,
+      clampMods.length ? `Die ${clampMods.length} platzierten CT-Klemmen werden ebenfalls entfernt.` : null,
       behind ? `${behind} Abgänge dahinter werden an die vorherige Stelle gehängt.` : null,
       feeds.length ? `Achtung: ${feeds.join(", ")} wird davon gespeist und hängt danach an der Hauszuleitung.` : null].filter(Boolean).join("\n\n");
     if (!(await this.ask(msg, { ok: "Entfernen", danger: true }))) return;
     this.dissolveNodes([...ids]);
     for (const x of this.data.modules) if (x.rcd === mid) x.rcd = null;
-    this.data.modules = this.data.modules.filter((x) => x.id !== mid);
+    this.data.modules = this.data.modules.filter((x) => x.id !== mid && x.source !== mid);
     this.selection = null;
     this.changed();
   }

@@ -59,8 +59,11 @@ export const CATALOG = [
   {
     key: "meter", name: "Messgeräte", groups: [
       { name: "Energiemessung", items: [
-        { key: "pro3em", name: "Shelly Pro 3EM", sub: "3 Phasen, Wandler bis 120 A, ohne Relais", type: "meter", model: "Shelly Pro 3EM", width: 1, poles: 3, channels: 3, kind: "junction", phases: ["A", "B", "C"], match: /SPEM-003C/i },
-        { key: "proem", name: "Shelly Pro EM-50", sub: "2 Messkanäle bis 50 A, Relais 2 A", type: "meter", model: "Shelly Pro EM-50", width: 1, poles: 1, channels: 2, kind: "junction", match: /SPEM-002C/i },
+        // clamps: das Gerät stellt CT-Klemmen bereit, die als Anbaugeräte an die gemessenen Geräte gesetzt werden
+        { key: "pro3em", name: "Shelly Pro 3EM", sub: "3 CT-Klemmen bis 120 A, ohne Relais", type: "meter", model: "Shelly Pro 3EM", width: 1, poles: 1, channels: 0, clamps: ["A", "B", "C"], match: /SPEM-003C/i },
+        { key: "proem", name: "Shelly Pro EM-50", sub: "2 CT-Klemmen bis 50 A, Relais 2 A", type: "meter", model: "Shelly Pro EM-50", width: 1, poles: 1, channels: 0, clamps: ["1", "2"], match: /SPEM-002C/i },
+        { key: "vue2", name: "Emporia Vue 2", sub: "bis 16 CT-Klemmen + 3 Phasen A/B/C, Zuordnung von Hand", type: "meter", model: "Emporia Vue 2", width: 4, poles: 1, channels: 0, clamps: [...Array.from({ length: 16 }, (_, i) => String(i + 1)), "A", "B", "C"] },
+        { key: "vue3", name: "Emporia Vue 3", sub: "bis 16 CT-Klemmen + 3 Phasen A/B/C, Zuordnung von Hand", type: "meter", model: "Emporia Vue 3", width: 4, poles: 1, channels: 0, clamps: [...Array.from({ length: 16 }, (_, i) => String(i + 1)), "A", "B", "C"] },
         { key: "meter1", name: "Zwischenzähler 1-phasig", sub: "1 Kanal", type: "meter", width: 1, poles: 1, channels: 1, kind: "junction" },
         { key: "meter3", name: "Zwischenzähler 3-phasig", sub: "3 Kanäle L1–L3", type: "meter", width: 4, poles: 3, channels: 3, kind: "junction", phases: ["A", "B", "C"] },
       ] },

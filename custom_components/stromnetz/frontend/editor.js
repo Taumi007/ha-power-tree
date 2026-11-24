@@ -470,6 +470,7 @@ export class Editor {
         isRcd ? this.number("Nennstrom (A)", m, "rating", { min: 1, placeholder: "offen" }) : h("span"),
         this.number("Fehlerstrom (mA)", m, "rcd_ma", { min: 10 })) : null,
       nodes.length ? this.uplinkField(m, nodes) : null,
+      m.clamps ? this.clampSection(m) : null,
       ["relay", "meter", "other"].includes(m.type) || m.device || /shelly/i.test(m.model ?? "") ? this.shellyModuleField(m, nodes) : null,
 
       h("div", { class: "channels" },
@@ -478,7 +479,7 @@ export class Editor {
         !nodes.length && isRcd
           ? h("div", { class: "hint" }, "Dieser FI ist noch nicht im Fluss. Mit Kanälen L1–L3 und N bekommt er eine Einspeisung (Uplink), und die zugeordneten Sicherungen hängen dahinter.")
           : null,
-        !nodes.length && !isRcd ? h("div", { class: "hint" }, "Keine Kanäle.") : null,
+        !nodes.length && !isRcd && !m.clamps ? h("div", { class: "hint" }, "Keine Kanäle.") : null,
         h("div", { class: "row wrap" },
           !nodes.length && isRcd ? h("button", { class: "chip", onclick: () => this.p.addRcdChannels(id) }, "+ Kanäle L1–L3 und N anlegen") : null,
           !isRcd ? h("button", { class: "chip", onclick: () => this.p.addChannel(id) }, "+ Kanal") : null)),
@@ -496,10 +497,33 @@ export class Editor {
         h("button", { class: "chip danger", onclick: () => this.p.removeModule(id) }, icon(MDI.del, 16), " Gerät entfernen")));
   }
 
+  // CT-Klemmen eines Messgeräts: Entity und Einbauort je Klemme
+  clampSection(m) {
+    const net = this.net, hass = this.p.hass;
+    return h("div", { class: "channels" },
+      h("div", { class: "sec-title" }, `CT-Klemmen (${m.clamps.length})`),
+      ...m.clamps.map((c, i) => {
+        const placed = this.p.clampPlacement(m.id, i);
+        const t = placed ? net.mountTargets(placed)[0] : null;
+        const val = h("span", { class: "ch-val" });
+        this.live.push({ el: val, get: () => num(hass, c.entity) });
+        return h("div", { class: "clamp-line" },
+          h("b", {}, `Klemme ${c.name ?? i + 1}`),
+          h("span", { class: "muted grow" }, c.entity ?? "ohne Entity"),
+          placed
+            ? h("button", { class: "chip", onclick: () => this.p.go({ type: "module", id: placed.id }) },
+              t?.node ? `${net.address(t.node)} ${placed.mount === "top" ? "oben" : "unten"}` : net.moduleTitle(placed))
+            : h("span", { class: "warn small" }, "nicht platziert"),
+          val);
+      }),
+      h("div", { class: "row wrap" }, h("button", { class: "chip", onclick: () => this.p.openClampSetup(m.id) }, icon(MDI.pencil, 16), " Klemmen einrichten …")));
+  }
+
   // Anbaugerät (über/unter einer Reihe): je Kanal ein Zähler, den das Gerät darunter übernimmt
   mountForm(m) {
     const net = this.net, hass = this.p.hass;
     m.meters ??= [];
+    const src = m.source ? this.p.data.modules.find((x) => x.id === m.source) : null;
     const targets = net.mountTargets(m);
     const channel = (i) => {
       const t = targets[i];
@@ -507,6 +531,8 @@ export class Editor {
       const inp = h("input", { value: m.meters[i] ?? "", placeholder: "sensor.…_leistung", list: "sn-power" });
       inp.addEventListener("change", async () => {
         m.meters[i] = inp.value.trim() || null;
+        const src = m.source ? this.p.data.modules.find((x) => x.id === m.source) : null;
+        if (src?.clamps?.[m.clamp]) src.clamps[m.clamp].entity = m.meters[i];
         if (m.meters[i]) await this.p.adoptMountMeters(m);
         this.p.changed({ deferred: true });
       });
@@ -539,11 +565,13 @@ export class Editor {
       h("div", { class: "grid2" },
         this.text("Bezeichnung im Kasten", m, "label", { placeholder: "P1, Q1 …" }),
         this.select("Anbauort", m, "mount", [["top", "über der Reihe"], ["bottom", "unter der Reihe"]])),
-      this.shellyModuleField(m, []),
+      src ? h("div", { class: "field" }, h("span", { class: "flabel" }, "CT-Klemme von"),
+        h("div", { class: "row" }, h("button", { class: "chip", onclick: () => this.p.go({ type: "module", id: src.id }) }, `${net.moduleTitle(src)} · ${src.model ?? ""}`),
+          h("span", { class: "muted" }, `Klemme ${src.clamps?.[m.clamp]?.name ?? m.clamp + 1}`))) : this.shellyModuleField(m, []),
       h("div", { class: "channels" },
-        h("div", { class: "sec-title" }, `Kanäle (${m.meters.length})`),
+        h("div", { class: "sec-title" }, src ? "Zähler" : `Kanäle (${m.meters.length})`),
         ...m.meters.map((_, i) => channel(i)),
-        h("div", { class: "row wrap" },
+        src ? null : h("div", { class: "row wrap" },
           h("button", { class: "chip", onclick: () => setCount(m.meters.length + 1) }, "+ Kanal"),
           m.meters.length > 1 ? h("button", { class: "chip", onclick: () => setCount(m.meters.length - 1) }, "− Kanal") : null)),
       h("details", { class: "sec" },
