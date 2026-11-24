@@ -1,6 +1,6 @@
 // Schaltschrank: Frontansicht mit Hutschienen, Geräte per Ziehen platzieren
 import { onColor, ratingColor } from "./catalog.js";
-import { printLabels, printOverview } from "./print.js";
+import { printOverview } from "./print.js";
 import { MDI, MODULE_TYPE_LABEL, NEUTRAL, PHASE_LABEL, fmtW, h, icon, num } from "./util.js";
 
 const TE = 46;
@@ -123,7 +123,7 @@ export class CabinetView {
         h("button", { class: "chip", onclick: (e) => {
           e.stopPropagation();
           this.p.menu(e.clientX, e.clientY, [
-            { label: "Beschriftungsstreifen (1:1)", icon: MDI.printer, action: () => printLabels(this.p, cab.id) },
+            { label: "Beschriftung auf Etikettenpapier …", icon: MDI.printer, action: () => this.p.openLabelDialog(cab.id) },
             { label: "Kastenübersicht – A4 quer", icon: MDI.cabinet, action: () => printOverview(this.p, cab.id, "landscape") },
             { label: "Kastenübersicht – A4 hoch", icon: MDI.cabinet, action: () => printOverview(this.p, cab.id, "portrait") },
           ], "Drucken");

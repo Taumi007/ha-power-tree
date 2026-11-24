@@ -2,7 +2,6 @@
 import { onColor, ratingColor } from "./catalog.js";
 import { MODULE_TYPE_LABEL, PHASE_LABEL } from "./util.js";
 
-const TE_MM = 17.5; // Teilungseinheit nach DIN 43880
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
@@ -44,43 +43,168 @@ ${css}
   };
 }
 
-export function printLabels(panel, cabId) {
-  const cab = panel.net.cabinets.get(cabId);
-  const mods = panel.data.modules.filter((m) => m.cabinet === cabId && m.row !== null);
-  const rows = [];
-  for (let r = 0; r < cab.rows; r++) {
-    const inRow = mods.filter((m) => m.row === r).sort((a, b) => a.slot - b.slot);
-    if (!inRow.length) continue;
-    let cells = "", slot = 0;
-    for (const m of inRow) {
-      if (m.slot > slot) cells += `<div class="cell empty" style="width:${(m.slot - slot) * TE_MM}mm"></div>`;
-      const i = moduleInfo(panel, m);
-      cells += `<div class="cell" style="width:${(m.width || 1) * TE_MM}mm;${i.tint ? `background:color-mix(in srgb, #fff 82%, ${i.tint} 18%)` : ""}">
-        <i class="stripe" style="background:${i.stripe}"></i>
-        <b class="lb">${esc(m.label)}</b>
-        ${i.rating ? `<span class="rt" style="${i.rc ? `background:${i.rc};color:${onColor(i.rc)}` : ""}">${esc(i.rating)}</span>` : ""}
-      </div>`;
-      slot = m.slot + (m.width || 1);
-    }
-    if (slot < cab.width) cells += `<div class="cell empty" style="width:${(cab.width - slot) * TE_MM}mm"></div>`;
-    rows.push(`<div class="label-row"><div class="rl">${esc(cab.code)} · Reihe ${r + 1}</div><div class="strip">${cells}</div></div>`);
+// ── Beschriftung auf Etikettenpapier (z. B. Avery Zweckform 6603, A4 1-fach) ──
+export const LABEL_DEFAULTS = { te: 17.75, height: 15, margin: 5 };
+
+export function labelSettings(panel) {
+  const s = panel.data.settings ?? {};
+  const num = (v, d) => { const n = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : d; };
+  return { te: num(s.label_te_mm, LABEL_DEFAULTS.te), height: num(s.label_height_mm, LABEL_DEFAULTS.height),
+    margin: num(s.label_margin_mm, LABEL_DEFAULTS.margin) };
+}
+
+// Zellen einer Reihe: Geräte und Lücken, je mit Start-TE und Breite
+function rowCells(panel, cab, r) {
+  const mods = panel.data.modules.filter((m) => m.cabinet === cab.id && m.row === r).sort((a, b) => a.slot - b.slot);
+  const cells = [];
+  let slot = 0;
+  for (const m of mods) {
+    if (m.slot > slot) cells.push({ from: slot, width: m.slot - slot, empty: true });
+    cells.push({ from: m.slot, width: m.width || 1, m });
+    slot = m.slot + (m.width || 1);
   }
+  if (slot < cab.width) cells.push({ from: slot, width: cab.width - slot, empty: true });
+  return { cells, has: mods.length > 0 };
+}
+
+// Teilt eine Reihe in möglichst gleich lange Stücke mit höchstens maxTE; geschnitten wird nur
+// zwischen Geräten oder in Lücken, nie durch ein Gerät
+function splitRow(cells, total, maxTE) {
+  const blocked = new Set();
+  for (const c of cells) if (!c.empty) for (let t = c.from + 1; t < c.from + c.width; t++) blocked.add(t);
+  const segs = [];
+  let start = 0;
+  while (total - start > maxTE) {
+    const parts = Math.ceil((total - start) / maxTE);
+    const target = start + Math.round((total - start) / parts);
+    let cut = null;
+    for (let d = 0; d <= maxTE; d++) {
+      for (const t of [target - d, target + d]) {
+        if (cut === null && t > start && t <= start + maxTE && t < total && !blocked.has(t)) cut = t;
+      }
+    }
+    if (cut === null) cut = start + maxTE; // Gerät breiter als das Blatt: dann eben hart schneiden
+    segs.push([start, cut]);
+    start = cut;
+  }
+  segs.push([start, total]);
+  return segs;
+}
+
+function segmentHtml(panel, cells, from, to, te) {
+  let html = "";
+  for (const c of cells) {
+    const a = Math.max(c.from, from), b = Math.min(c.from + c.width, to);
+    if (b <= a) continue;
+    if (c.empty) { html += `<div class="cell empty" style="width:${(b - a) * te}mm"></div>`; continue; }
+    const m = c.m, i = moduleInfo(panel, m);
+    html += `<div class="cell" style="width:${(b - a) * te}mm;${i.tint ? `background:color-mix(in srgb, #fff 82%, ${i.tint} 18%)` : ""}">
+      <i class="stripe" style="background:${i.stripe}"></i>
+      <b class="lb">${esc(m.label)}</b>
+      ${i.rating ? `<span class="rt" style="${i.rc ? `background:${i.rc};color:${onColor(i.rc)}` : ""}">${esc(i.rating)}</span>` : ""}
+    </div>`;
+  }
+  return html;
+}
+
+// Streifen für die Auswahl {cabId: [reihen]} bei gegebener nutzbarer Breite
+export function labelStrips(panel, selection, usableW) {
+  const { te } = labelSettings(panel);
+  const maxTE = Math.max(1, Math.floor(usableW / te));
+  const strips = [];
+  for (const cab of panel.data.cabinets) {
+    for (const r of (selection[cab.id] ?? []).slice().sort((a, b) => a - b)) {
+      const { cells, has } = rowCells(panel, cab, r);
+      if (!has) continue;
+      // Leere TE am Anfang und Ende eines Stücks brauchen kein Etikett; ganz leere Stücke entfallen
+      const mods = cells.filter((c) => !c.empty);
+      const trim = ([a, b]) => {
+        const inside = mods.filter((c) => c.from < b && c.from + c.width > a);
+        if (!inside.length) return null;
+        return [Math.max(a, Math.min(...inside.map((c) => c.from))), Math.min(b, Math.max(...inside.map((c) => c.from + c.width)))];
+      };
+      const segs = splitRow(cells, cab.width, maxTE).map(trim).filter(Boolean);
+      segs.forEach(([a, b], i) => strips.push({
+        title: `${cab.code} · Reihe ${r + 1}${segs.length > 1 ? ` · Teil ${i + 1}/${segs.length}` : ""} · TE ${a + 1}–${b}`,
+        w: (b - a) * te, html: () => segmentHtml(panel, cells, a, b, te),
+      }));
+    }
+  }
+  return strips;
+}
+
+const GAP = 2;    // mm zwischen den Streifen
+const HEAD = 3.2; // mm Kopfzeile über jedem Streifen
+
+// Regal-Packung in natürlicher Reihenfolge (Kasten, Reihe, Teil): jeder Streifen kommt in die
+// erste Zeile, in die er noch passt; so bleiben Teile einer Reihe beisammen und kurze füllen Lücken
+function pack(strips, W, H, lineH) {
+  const perSheet = Math.max(1, Math.floor((H + GAP) / (lineH + GAP)));
+  const lines = [];
+  for (const s of strips) {
+    const line = lines.find((l) => l.used + GAP + s.w <= W + 0.01);
+    if (line) { s.x = line.used + GAP; line.used += GAP + s.w; line.items.push(s); }
+    else { s.x = 0; lines.push({ used: s.w, items: [s] }); }
+  }
+  const sheets = [];
+  lines.forEach((l, i) => {
+    const sheet = Math.floor(i / perSheet);
+    (sheets[sheet] ??= []).push(...l.items.map((s) => ({ ...s, y: (i % perSheet) * (lineH + GAP) })));
+  });
+  return sheets;
+}
+
+// Plan für eine Ausrichtung; "auto" nimmt die mit weniger Blättern, bei Gleichstand weniger Teilungen
+export function labelPlan(panel, selection, orientation = "auto", calib = false) {
+  const { height, margin, te } = labelSettings(panel);
+  const lineH = height + HEAD;
+  const make = (o) => {
+    const W = (o === "portrait" ? 210 : 297) - 2 * margin;
+    const H = (o === "portrait" ? 297 : 210) - 2 * margin;
+    const strips = labelStrips(panel, selection, W);
+    if (calib) strips.push({ calib: true, title: "Kalibrierung", w: Math.min(W, Math.max(100, 10 * te)) });
+    const sheets = pack(strips, W, H, lineH);
+    return { orientation: o, W, H, sheets, strips: strips.filter((s) => !s.calib).length };
+  };
+  if (orientation !== "auto") return make(orientation);
+  const p = make("portrait"), l = make("landscape");
+  if (p.sheets.length !== l.sheets.length) return p.sheets.length < l.sheets.length ? p : l;
+  return p.strips <= l.strips ? p : l;
+}
+
+export function printLabelSheets(panel, selection, orientation = "auto", calib = false) {
+  const { height, margin, te } = labelSettings(panel);
+  const plan = labelPlan(panel, selection, orientation, calib);
+  if (!plan.sheets.length) return null;
+  const calibHtml = (w) => `<div class="calib" style="width:${w}mm;height:${height}mm">
+      <div class="bar" style="width:100mm"><span>100 mm</span></div>
+      <div class="bar te" style="width:${10 * te}mm"><span>10 TE = ${(10 * te).toFixed(1).replace(".", ",")} mm</span></div>
+    </div>`;
+  const pages = plan.sheets.map((items) => `<div class="page">${items.map((s) => `
+    <div class="item" style="left:${s.x}mm;top:${s.y}mm;width:${s.w}mm">
+      <div class="rl">${esc(s.title)}</div>
+      ${s.calib ? calibHtml(s.w) : `<div class="strip" style="height:${height}mm">${s.html()}</div>`}
+    </div>`).join("")}</div>`).join("");
   const css = `
-@page { size: A4 landscape; margin: 6mm; }
-h1 { font-size: 13pt; margin: 0 0 2mm; }
-.label-row { margin-bottom: 7mm; break-inside: avoid; }
-.rl { font-size: 8pt; color: #666; margin-bottom: 1mm; }
-.strip { display: flex; height: 15mm; border: 0.3mm solid #444; width: max-content; }
+@page { size: A4 ${plan.orientation}; margin: ${margin}mm; }
+@media screen { body { padding: 10mm; background: #f2f2f2; } .page { background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.2); margin-bottom: 8mm; } }
+.page { position: relative; width: ${plan.W}mm; height: ${plan.H}mm; overflow: hidden; break-after: page; }
+.page:last-child { break-after: auto; }
+.item { position: absolute; }
+.rl { height: ${HEAD}mm; font-size: 6.5pt; line-height: ${HEAD}mm; color: #777; white-space: nowrap; overflow: hidden; }
+.strip { display: flex; outline: 0.2mm dashed #555; }
 .cell { position: relative; height: 100%; border-right: 0.2mm dashed #888; padding: 1.8mm 0.3mm 0.6mm; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6mm; text-align: center; }
 .cell:last-child { border-right: 0; }
 .cell.empty { background: repeating-linear-gradient(45deg, #fff 0 1.5mm, #f1f1f1 1.5mm 3mm); }
 .stripe { position: absolute; left: 0; right: 0; top: 0; height: 1.4mm; }
 .lb { font-size: 16pt; line-height: 1; letter-spacing: -0.3pt; white-space: nowrap; }
-.rt { font-size: 8pt; font-weight: 700; line-height: 1; padding: 0.4mm 0.8mm; border-radius: 0.6mm; border: 0.15mm solid #888; }`;
-  printHtml(`Beschriftung ${cab.code}`, css,
-    `<div class="sheet"><h1>Beschriftung ${esc(cab.code)} – ${esc(cab.name)}</h1>
-     <p class="hint">Maßstab 1:1 (1 TE = ${TE_MM} mm). Beim Drucken »Tatsächliche Größe / 100 %« wählen, an der gestrichelten Linie entlang schneiden.</p>
-     ${rows.join("") || "<p>Keine platzierten Geräte.</p>"}</div>`);
+.rt { font-size: 8pt; font-weight: 700; line-height: 1; padding: 0.4mm 0.8mm; border-radius: 0.6mm; border: 0.15mm solid #888; }
+.calib { display: flex; flex-direction: column; justify-content: space-around; outline: 0.2mm dashed #555; padding: 0 0 0 0; }
+.bar { position: relative; height: 3mm; border: 0.2mm solid #000; border-top: 0; }
+.bar.te { border-color: #1565c0; }
+.bar span { position: absolute; left: 1mm; top: -0.2mm; font-size: 6.5pt; line-height: 3mm; }`;
+  printHtml("Beschriftung", css, pages);
+  return plan;
 }
 
 export function printOverview(panel, cabId, orientation = "landscape") {

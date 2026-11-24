@@ -222,6 +222,19 @@ header { min-width: 0; overflow: hidden; }
 .pk-sw.none { background: transparent; box-shadow: inset 0 0 0 1px var(--sn-div); }
 .pk-foot { padding: 10px 20px; border-top: 1px solid var(--sn-div); font-size: 12px; }
 @media (max-width: 640px) { .pk-body { flex-direction: column; } .pk-cats { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--sn-div); } }
+/* Beschriftungsdialog */
+.lbl-dialog { height: min(620px, calc(100vh - 64px)); }
+.lbl-list { padding-top: 8px; }
+.lbl-cab { padding: 8px 0; border-bottom: 1px solid var(--sn-div); }
+.lbl-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.lbl-rows { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 0 0 26px; }
+.lbl-row { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.lbl-opts { flex: none; width: 260px; padding: 12px 16px; border-left: 1px solid var(--sn-div); display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.lbl-num { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.lbl-num span { color: var(--sn-sub); }
+.lbl-opts .small { font-size: 12px; line-height: 1.4; margin: 4px 0 0; }
+.lbl-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+@media (max-width: 640px) { .lbl-opts { width: auto; border-left: 0; border-top: 1px solid var(--sn-div); } }
 /* Panel-Kopf: Zurück und Pfad */
 .drawer .close { display: none; }
 .dnav { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 10px; background: var(--sn-card); border-bottom: 1px solid var(--sn-div); }

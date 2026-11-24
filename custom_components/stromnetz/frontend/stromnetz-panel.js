@@ -6,6 +6,7 @@ import { Net } from "./net.js";
 import { STYLE } from "./style.js";
 import { CATALOG, CATALOG_BY_KEY, catalogForDevice, dinVariant, itemWidth, ratingColor } from "./catalog.js";
 import { roomSankey } from "./sankey.js";
+import { LABEL_DEFAULTS, labelPlan, printLabelSheets } from "./print.js";
 import { GRID, KIND_LABEL, MDI, PHASES, PHASE_LABEL, clone, debounce, fireMoreInfo, fmtW, h, icon, newId, num, slug } from "./util.js";
 
 const TABS = [["flow", "Fluss"], ["cabinet", "Schaltschrank"], ["balance", "Bilanz"], ["data", "Daten"]];
@@ -821,6 +822,81 @@ class StromnetzPanel extends HTMLElement {
       h("div", { class: "pk-body" }, left, right),
       h("div", { class: "pk-foot muted" }, "Breiten sind Richtwerte – bitte am Gerät prüfen und bei Bedarf im Gerät anpassen.")));
     this.pickerEl.classList.add("open");
+  }
+
+  // Beschriftung: Kästen und Reihen wählen, auf A4-Etikettenpapier gepackt drucken
+  openLabelDialog(preselect) {
+    this.closeMenu();
+    const s = this.data.settings;
+    let sel;
+    try { sel = JSON.parse(localStorage.getItem("stromnetz.labelsel") ?? "null"); } catch { sel = null; }
+    if (!sel || preselect) sel = {};
+    const rowsOf = (cab) => [...new Set(this.data.modules.filter((m) => m.cabinet === cab.id && m.row !== null).map((m) => m.row))].sort((a, b) => a - b);
+    if (preselect) { const cab = this.data.cabinets.find((c) => c.id === preselect); if (cab) sel[cab.id] = rowsOf(cab); }
+    let orientation = "auto", calib = false;
+    const summary = h("div", { class: "muted" });
+    const save = () => { try { localStorage.setItem("stromnetz.labelsel", JSON.stringify(sel)); } catch { /* egal */ } };
+    const update = () => {
+      const n = Object.values(sel).reduce((a, r) => a + r.length, 0);
+      if (!n && !calib) { summary.textContent = "Nichts ausgewählt."; return; }
+      const plan = labelPlan(this, sel, orientation, calib);
+      summary.textContent = `${plan.strips} Streifen auf ${plan.sheets.length} ${plan.sheets.length === 1 ? "Blatt" : "Blättern"} · ${plan.orientation === "portrait" ? "Hochformat" : "Querformat"}`;
+    };
+    const list = h("div", { class: "pk-list lbl-list" }, ...this.data.cabinets.map((cab) => {
+      const rows = rowsOf(cab);
+      if (!rows.length) return null;
+      const boxes = rows.map((r) => {
+        const cb = h("input", { type: "checkbox", checked: (sel[cab.id] ?? []).includes(r) });
+        cb.addEventListener("change", () => {
+          const cur = new Set(sel[cab.id] ?? []);
+          cb.checked ? cur.add(r) : cur.delete(r);
+          sel[cab.id] = [...cur];
+          all.checked = sel[cab.id].length === rows.length;
+          all.indeterminate = sel[cab.id].length > 0 && !all.checked;
+          save(); update();
+        });
+        return { r, cb };
+      });
+      const all = h("input", { type: "checkbox" });
+      const n0 = (sel[cab.id] ?? []).length;
+      all.checked = n0 === rows.length; all.indeterminate = n0 > 0 && n0 < rows.length;
+      all.addEventListener("change", () => {
+        sel[cab.id] = all.checked ? [...rows] : [];
+        boxes.forEach((b) => { b.cb.checked = all.checked; });
+        save(); update();
+      });
+      return h("section", { class: "lbl-cab" },
+        h("label", { class: "lbl-head" }, all, h("b", {}, cab.code), h("span", { class: "muted" }, ` ${cab.name} · ${cab.width} TE`)),
+        h("div", { class: "lbl-rows" }, ...boxes.map((b) => h("label", { class: "lbl-row" }, b.cb, `Reihe ${b.r + 1}`))));
+    }));
+    const orient = h("select", {}, h("option", { value: "auto" }, "Automatisch (spart Papier)"),
+      h("option", { value: "portrait" }, "Hochformat"), h("option", { value: "landscape" }, "Querformat"));
+    orient.addEventListener("change", () => { orientation = orient.value; update(); });
+    const cal = h("input", { type: "checkbox" });
+    cal.addEventListener("change", () => { calib = cal.checked; update(); });
+    const num = (label, key, def, hint) => {
+      const inp = h("input", { type: "number", step: "0.05", min: "1", value: s[key] ?? def, style: { width: "90px" } });
+      inp.addEventListener("change", () => { s[key] = parseFloat(inp.value) || def; this.changed(); update(); });
+      return h("label", { class: "lbl-num", title: hint }, h("span", {}, label), inp);
+    };
+    this.pickerEl.replaceChildren(h("div", { class: "pk-dialog lbl-dialog", role: "dialog", "aria-label": "Beschriftung drucken", onclick: (e) => e.stopPropagation() },
+      h("div", { class: "pk-head" }, h("b", {}, "Beschriftung auf Etikettenpapier"),
+        h("button", { class: "icon-btn", "aria-label": "Schließen", onclick: () => this.closePicker() }, icon(MDI.close))),
+      h("div", { class: "pk-body" }, list,
+        h("div", { class: "lbl-opts" },
+          h("label", { class: "lbl-num" }, h("span", {}, "Ausrichtung"), orient),
+          num("mm pro TE", "label_te_mm", LABEL_DEFAULTS.te, "Am eigenen Verteiler messen: Breite von z. B. 20 TE geteilt durch 20"),
+          num("Streifenhöhe (mm)", "label_height_mm", LABEL_DEFAULTS.height),
+          num("Blattrand (mm)", "label_margin_mm", LABEL_DEFAULTS.margin, "Nicht bedruckbarer Rand des Druckers"),
+          h("label", { class: "lbl-row" }, cal, "Kalibrierstreifen mitdrucken"),
+          h("p", { class: "muted small" }, "Lange Reihen werden zwischen zwei Geräten geteilt. Beim Drucken »Tatsächliche Größe / 100 %« wählen. Passt der Kalibrierstreifen nicht genau auf 100 mm, »mm pro TE« entsprechend anpassen."))),
+      h("div", { class: "pk-foot lbl-foot" }, summary,
+        h("button", { class: "btn primary", onclick: () => {
+          const plan = printLabelSheets(this, sel, orientation, calib);
+          if (!plan) this.toast("Nichts zum Drucken ausgewählt.");
+        } }, icon(MDI.printer, 16), " Drucken"))));
+    this.pickerEl.classList.add("open");
+    update();
   }
 
   closePicker() {
