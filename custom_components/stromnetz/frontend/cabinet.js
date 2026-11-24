@@ -236,14 +236,13 @@ export class CabinetView {
       const vals = nodes.map((n) => net.value(n.id, this.p.hass)).filter((v) => v !== null);
       return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     } });
-    // Mehrphasig mit Zählern: zusätzlich der Wert je Kanal
+    // Mehrphasig mit Zählern: statt der Summe der Wert je Kanal, jeweils unter seinem Abschnitt
     const metered = nodes.filter((n) => net.meterOf(n.id));
-    const chVals = metered.length > 1 ? h("span", { class: "chvals" }, ...metered.map((n) => {
+    const chVals = metered.length > 1 ? h("span", { class: "mval chrow" }, ...nodes.map((n) => {
       const ph = net.phase(n.id);
-      const v = h("span", {});
+      const v = h("span", { class: "chv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} });
       this.live.push({ el: v, get: () => net.value(n.id, this.p.hass) });
-      return h("span", { class: "chv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} },
-        h("i", {}, ph ? PHASE_LABEL[ph] : String(n.channel ?? "")), v);
+      return v;
     })) : null;
     const rcd = m.rcd ? net.modules.get(m.rcd) : null;
     // Ein Schalter je Entity (ein 3-poliges Schütz hat oft nur einen)
@@ -261,8 +260,7 @@ export class CabinetView {
       h("span", { class: "mtop" }, h("b", { class: "mlabel" }, m.label || "?"), rating),
       h("span", { class: "mname" }, name),
       switches.length ? h("span", { class: "switches" }, ...switches.map((n) => this.switchBtn(n))) : null,
-      chVals,
-      m.type === "rcd" ? h("span", { class: "mval muted" }, m.rcd_ma ? `${m.rating ? `${m.rating} A · ` : ""}${m.rcd_ma} mA` : "FI") : val);
+      m.type === "rcd" ? h("span", { class: "mval muted" }, m.rcd_ma ? `${m.rating ? `${m.rating} A · ` : ""}${m.rcd_ma} mA` : "FI") : chVals ?? val);
     el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));
     this.bindDrag(el, m);
     return el;
@@ -280,14 +278,14 @@ export class CabinetView {
       `${(m.meters ?? []).filter(Boolean).length}/${(m.meters ?? []).length} Zähler`].filter(Boolean).join(" · ");
     const vals = (m.meters ?? []).map((e, i) => {
       const ph = targets[i]?.node ? net.phase(targets[i].node) : null;
-      const v = h("span", { class: "mv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} });
+      const v = h("span", { class: "chv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} });
       this.live.push({ el: v, get: () => num(this.p.hass, e) });
       return v;
     });
     const el = h("div", { class: `mount${selected ? " selected" : ""}${width > 60 ? " wide" : ""}`, title,
       style: { left: `${48 + m.slot * TE}px`, top: `${this.zoneTop(m.row, m.mount)}px`, width: `${width}px`, height: `${ZONE}px` } },
       h("span", { class: "mhead" }, h("b", { class: "mlabel" }, m.label || "?"), width > 90 ? h("span", { class: "mname" }, m.model ?? "") : null),
-      h("span", { class: "mvals" }, ...vals));
+      h("span", { class: "mvals chrow" }, ...vals));
     el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));
     this.bindDrag(el, m);
     return el;
