@@ -102,6 +102,14 @@ main { flex: 1; min-height: 0; position: relative; }
 .module .mname { flex: 1; min-height: 0; writing-mode: vertical-rl; transform: rotate(180deg); color: var(--sn-text); font-size: 12.5px; font-weight: 500; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .module.wide .mname { writing-mode: horizontal-tb; transform: none; text-align: center; white-space: normal; padding: 0 6px; font-size: 13px; display: flex; align-items: center; }
 .module .mval { font-variant-numeric: tabular-nums; color: var(--sn-text); font-weight: 600; }
+.zone { position: absolute; border: 1px dashed color-mix(in srgb, var(--sn-accent) 45%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--sn-accent) 5%, transparent); }
+.zslot { font-size: 14px; }
+.mount { position: absolute; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 6px; background: color-mix(in srgb, var(--sn-accent) 16%, var(--sn-raised)); border: 1px solid color-mix(in srgb, var(--sn-accent) 60%, transparent); border-radius: 4px; font-size: 11px; cursor: pointer; user-select: none; touch-action: none; overflow: hidden; white-space: nowrap; }
+.mount .mname { color: var(--sn-sub); overflow: hidden; text-overflow: ellipsis; }
+.mount.selected { border: 2px solid var(--sn-accent); }
+.mount.blocked { opacity: .5; outline: 2px solid var(--error-color, #db4437); }
+.mount-bar { position: absolute; height: 4px; padding: 0; border: 0; border-radius: 2px; background: var(--sn-accent); cursor: pointer; }
+.mount-bar.selected { height: 6px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--sn-accent) 35%, transparent); }
 .module.selected { border: 2px solid var(--sn-accent); background: var(--sn-sel); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sn-accent) 30%, transparent); }
 .module.blocked { outline: 2px solid var(--error-color, #db4437); }
 .module.type-rcd { background: color-mix(in srgb, var(--sn-raised) 85%, var(--sn-text) 15%); }

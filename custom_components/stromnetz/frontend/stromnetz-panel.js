@@ -607,6 +607,38 @@ class StromnetzPanel extends HTMLElement {
     return { m, nodes, placed: row !== null };
   }
 
+  // Anbaugerät (über/unter einer Reihe): ohne eigene Knoten, je Kanal ein Zähler
+  createMount(cabId, item, at) {
+    const id = newId(`${cabId}_${item.key}`, new Set(this.data.modules.map((m) => m.id)));
+    const m = { id, cabinet: cabId, row: at.row, slot: at.slot, width: item.width, type: "meter", label: this.nextLabel(cabId, "meter"),
+      model: item.model ?? item.name, poles: item.channels, rating: null, curve: null, rcd: null, rcd_ma: null, notes: null, device: null,
+      mount: at.mount, meters: Array(item.channels).fill(null) };
+    this.data.modules.push(m);
+    this.selection = { type: "module", id };
+    this.closePicker();
+    this.changed();
+  }
+
+  openMountPicker(cabId, at) {
+    this.closeMenu();
+    const net = this.net;
+    const cab = net.cabinets.get(cabId);
+    const items = CATALOG.filter((c) => c.mount).flatMap((c) => c.groups.flatMap((g) => g.items));
+    const list = h("div", { class: "pk-list" }, ...items.map((it) => {
+      const ok = net.fits(cabId, at.row, at.slot, it.width, null, at.mount);
+      return h("button", { class: "pk-item", onclick: () => (ok ? this.createMount(cabId, it, at) : this.toast("Dort ist nicht genug Platz.")) },
+        h("i", { class: "pk-sw none" }), h("span", { class: "grow" }, h("b", {}, it.name), h("span", { class: "muted" }, ` · ${it.sub}`)),
+        h("span", { class: ok ? "muted" : "warn" }, `${it.width} TE${ok ? "" : " · kein Platz"}`));
+    }));
+    const where = `${at.mount === "top" ? "über" : "unter"} Reihe ${at.row + 1}, ab Platz ${at.slot + 1}`;
+    this.pickerEl.replaceChildren(h("div", { class: "pk-dialog", role: "dialog", "aria-label": "Anbaugerät einsetzen", onclick: (e) => e.stopPropagation() },
+      h("div", { class: "pk-head" }, h("div", {}, h("b", {}, "Anbaugerät einsetzen"), h("span", { class: "muted" }, ` · ${cab.code} · ${where}`)),
+        h("button", { class: "icon-btn", "aria-label": "Schließen", onclick: () => this.closePicker() }, icon(MDI.close))),
+      h("div", { class: "pk-body" }, list),
+      h("div", { class: "pk-foot muted" }, "Kein eigener Knoten im Fluss: Jeder Kanal gibt seinen Zähler an das Gerät darunter (bei mehrpoligen an den passenden Pol).")));
+    this.pickerEl.classList.add("open");
+  }
+
   // Katalogeintrag einsetzen: Einzelgerät oder Kombination
   insertItem(cabId, item, at, opts = {}) {
     const parts = item.combo ?? [{ use: null }];
@@ -795,7 +827,7 @@ class StromnetzPanel extends HTMLElement {
   openPicker(cabId, at) {
     this.closeMenu();
     const net = this.net;
-    const cats = CATALOG.filter((c) => c.din !== false);
+    const cats = CATALOG.filter((c) => c.din !== false && !c.mount);
     let cat = cats.some((c) => c.key === this._pickerCat) ? this._pickerCat : cats[0].key;
     const left = h("nav", { class: "pk-cats" });
     const right = h("div", { class: "pk-list" });
@@ -833,7 +865,7 @@ class StromnetzPanel extends HTMLElement {
     let sel;
     try { sel = JSON.parse(localStorage.getItem("stromnetz.labelsel") ?? "null"); } catch { sel = null; }
     if (!sel || preselect) sel = {};
-    const rowsOf = (cab) => [...new Set(this.data.modules.filter((m) => m.cabinet === cab.id && m.row !== null).map((m) => m.row))].sort((a, b) => a - b);
+    const rowsOf = (cab) => [...new Set(this.data.modules.filter((m) => m.cabinet === cab.id && m.row !== null && !m.mount).map((m) => m.row))].sort((a, b) => a - b);
     if (preselect) { const cab = this.data.cabinets.find((c) => c.id === preselect); if (cab) sel[cab.id] = rowsOf(cab); }
     let orientation = "auto", calib = false;
     const summary = h("div", { class: "muted" });
@@ -969,6 +1001,20 @@ class StromnetzPanel extends HTMLElement {
   }
 
   linkModuleDevice(m, devId) {
+    if (m.mount) {
+      const dev = devId ? this.shelly?.byId.get(devId) : null;
+      if (devId && !dev) return;
+      m.device = devId || null;
+      if (dev) {
+        const n = Math.max(m.meters?.length ?? 0, dev.channels.length);
+        m.meters = Array.from({ length: n }, (_, i) => dev.channels[i]?.power ?? m.meters?.[i] ?? null);
+        m.poles = n;
+        if (!m.model) m.model = dev.model;
+        this.toast(`${dev.name} verknüpft: ${dev.channels.length} Zähler übernommen.`);
+      }
+      this.changed();
+      return;
+    }
     if (!devId) {
       m.device = null;
       this.changed();
@@ -1346,7 +1392,7 @@ class StromnetzPanel extends HTMLElement {
     const oldLabel = m.label;
     m.cabinet = cabId;
     if (m.label && taken.has(m.label)) m.label = this.nextLabel(cabId, m.type);
-    const at = this.net.freeSlot(cabId, m.width || 1);
+    const at = m.mount ? { row: null, slot: null } : this.net.freeSlot(cabId, m.width || 1);
     m.row = at.row;
     m.slot = at.slot;
     this.cabinetView.current = cabId;
@@ -1395,6 +1441,13 @@ class StromnetzPanel extends HTMLElement {
   removeModule(mid) {
     const nodes = this.net.moduleNodes.get(mid) ?? [];
     const m = this.net.modules.get(mid);
+    if (m?.mount) {
+      if (!confirm(`Anbaugerät ${this.net.moduleTitle(m)} entfernen? Die Geräte darunter verlieren seine Zähler.`)) return;
+      this.data.modules = this.data.modules.filter((x) => x.id !== mid);
+      this.selection = null;
+      this.changed();
+      return;
+    }
     const ids = new Set(nodes.map((n) => n.id));
     const behind = this.data.nodes.filter((n) => ids.has(n.parent)).length;
     const feeds = this.data.cabinets.filter((c) => ids.has(c.feed)).map((c) => c.code);

@@ -31,6 +31,39 @@ export class Net {
       this.moduleNodes.get(n.module).push(n);
     }
     for (const list of this.moduleNodes.values()) list.sort((a, b) => (a.channel ?? 0) - (b.channel ?? 0));
+    // Anbaugeräte: ihre Zähler gelten für die Kanäle darunter (nur in dieser Sicht, nicht in den Daten)
+    this.mountMeters = new Map();
+    for (const m of data.modules) {
+      for (const t of this.mountTargets(m)) {
+        if (!t.entity || !t.node) continue;
+        const n = this.nodes.get(t.node);
+        if (n?.meter) continue;
+        this.mountMeters.set(t.node, { entity: t.entity, from: m.id, channel: t.channel });
+      }
+    }
+  }
+
+  // [{channel, entity, te, node}] eines Anbaugeräts: Kanal i über TE slot + i·Breite/Kanäle
+  mountTargets(m) {
+    const meters = m.meters ?? [];
+    if (!m.mount || m.row === null || m.row === undefined || m.slot === null || m.slot === undefined || !meters.length) return [];
+    const width = m.width || 1;
+    return meters.map((entity, i) => {
+      const te = m.slot + Math.floor((i * width) / meters.length);
+      const x = this.data.modules.find((y) => y.cabinet === m.cabinet && !y.mount && y.row === m.row
+        && y.slot !== null && y.slot <= te && te < y.slot + (y.width || 1));
+      const chans = x ? this.moduleNodes.get(x.id) ?? [] : [];
+      // je Pol 1 TE (z. B. 3+N auf 4 TE: N ohne Kanal); mehr Kanäle als TE: anteilig
+      const xw = x?.width || 1;
+      const k = x ? (xw >= chans.length ? te - x.slot : Math.floor(((te - x.slot) * chans.length) / xw)) : -1;
+      const node = k >= 0 && k < chans.length ? chans[k].id : null;
+      return { channel: i, entity, te, module: x?.id ?? null, node };
+    });
+  }
+
+  // Zähler eines Knotens: eigener oder der eines Anbaugeräts darüber/darunter
+  meterOf(id) {
+    return this.nodes.get(id)?.meter || this.mountMeters?.get(id)?.entity || null;
   }
 
   kids(id) {
@@ -90,7 +123,8 @@ export class Net {
     const n = this.nodes.get(id);
     if (!n) return id;
     if (n.name) return n.name;
-    if (n.meter) return friendly(hass, n.meter).replace(/ Leistung$/, "");
+    const meter = this.meterOf(id);
+    if (meter) return friendly(hass, meter).replace(/ Leistung$/, "");
     return id;
   }
 
@@ -106,7 +140,8 @@ export class Net {
   value(id, hass) {
     const n = this.nodes.get(id);
     if (!n) return null;
-    if (n.meter) return num(hass, n.meter);
+    const meter = this.meterOf(id);
+    if (meter) return num(hass, meter);
     const s = this.sensorsOf(id).summe;
     return s ? num(hass, s) : null;
   }
@@ -138,19 +173,20 @@ export class Net {
     return [...PHASES, "N"].filter((p) => set.has(p));
   }
 
-  occupied(cabId, exceptModule) {
+  // Belegung der Hutschiene (mount null) oder einer Anbauzone ("top"/"bottom")
+  occupied(cabId, exceptModule, mount = null) {
     const occ = new Map();
     for (const m of this.data.modules) {
-      if (m.cabinet !== cabId || m.id === exceptModule || m.row === null || m.slot === null) continue;
+      if (m.cabinet !== cabId || m.id === exceptModule || m.row === null || m.slot === null || (m.mount ?? null) !== mount) continue;
       for (let i = 0; i < (m.width || 1); i++) occ.set(`${m.row}:${m.slot + i}`, m.id);
     }
     return occ;
   }
 
-  fits(cabId, row, slot, width, exceptModule) {
+  fits(cabId, row, slot, width, exceptModule, mount = null) {
     const cab = this.cabinets.get(cabId);
     if (!cab || row < 0 || slot < 0 || row >= cab.rows || slot + width > cab.width) return false;
-    const occ = this.occupied(cabId, exceptModule);
+    const occ = this.occupied(cabId, exceptModule, mount);
     for (let i = 0; i < width; i++) if (occ.has(`${row}:${slot + i}`)) return false;
     return true;
   }

@@ -414,13 +414,17 @@ export class Editor {
       n.meter = v;
       this.p.changed({ deferred: true });
     });
-    return this.field("Zähler (Leistung)", inp);
+    const mm = !n.meter ? net.mountMeters?.get(n.id) : null;
+    const from = mm ? net.modules.get(mm.from) : null;
+    return this.field("Zähler (Leistung)", inp,
+      from ? `Leer gelassen: kommt vom Anbaugerät ${net.moduleTitle(from)} (Kanal ${mm.channel + 1}, ${mm.entity})` : undefined);
   }
 
   // ── Hutschienengerät ──────────────────────────────────────────────────────
   module(id) {
     const net = this.net, m = net.modules.get(id);
     if (!m) return null;
+    if (m.mount) return this.mountForm(m);
     const hass = this.p.hass;
     const nodes = net.moduleNodes.get(id) ?? [];
     const cols = this.p.data.settings.colors;
@@ -486,6 +490,66 @@ export class Editor {
       this.text("Notizen", m, "notes", { multiline: true, placeholder: "Notiz …" }),
       h("div", { class: "row end" },
         h("button", { class: "chip danger", onclick: () => this.p.removeModule(id) }, icon(MDI.del, 16), " Gerät entfernen")));
+  }
+
+  // Anbaugerät (über/unter einer Reihe): je Kanal ein Zähler, den das Gerät darunter übernimmt
+  mountForm(m) {
+    const net = this.net, hass = this.p.hass;
+    m.meters ??= [];
+    const targets = net.mountTargets(m);
+    const channel = (i) => {
+      const t = targets[i];
+      const node = t?.node ? net.nodes.get(t.node) : null;
+      const inp = h("input", { value: m.meters[i] ?? "", placeholder: "sensor.…_leistung", list: "sn-power" });
+      inp.addEventListener("change", () => {
+        m.meters[i] = inp.value.trim() || null;
+        this.p.changed({ deferred: true });
+      });
+      const val = h("span", { class: "ch-val" });
+      this.live.push({ el: val, get: () => num(hass, m.meters[i]) });
+      const own = node?.meter && node.meter !== m.meters[i];
+      return h("section", { class: "channel" },
+        h("div", { class: "ch-head" }, h("b", {}, `Kanal ${i + 1}`),
+          h("span", { class: "muted grow" }, node ? `→ ${net.address(node.id)} · ${net.name(node.id, hass)}` : "kein Gerät darunter"), val,
+          node ? h("button", { class: "icon-btn small", title: "Gerät darunter öffnen", "aria-label": "Gerät darunter öffnen", onclick: () => this.p.go({ type: "node", id: node.id }) }, icon(MDI.pencil, 16)) : null),
+        this.field("Zähler (Leistung)", inp),
+        own ? h("div", { class: "hint" }, `${net.address(node.id)} hat einen eigenen Zähler (${node.meter}); dieser Kanal wird dort nicht verwendet.`) : null);
+    };
+    const setCount = (n) => {
+      if (n < 1) return;
+      m.meters = Array.from({ length: n }, (_, i) => m.meters[i] ?? null);
+      m.poles = n;
+      this.p.changed();
+    };
+    return h("div", { class: "form" },
+      h("div", { class: "dhead" }, h("div", {},
+        h("div", { class: "dtitle" }, net.moduleTitle(m)),
+        h("div", { class: "muted" }, `Anbaugerät ${m.mount === "top" ? "oben" : "unten"}${m.model ? ` · ${m.model}` : ""}${m.row !== null ? ` · Reihe ${m.row + 1}, ab Platz ${m.slot + 1}` : " · nicht platziert"}`))),
+      this.valueBox(() => {
+        const v = (m.meters ?? []).map((e) => num(hass, e)).filter((x) => x !== null);
+        return v.length ? v.reduce((a, b) => a + b, 0) : null;
+      }),
+      h("div", { class: "hint" }, "Kein eigener Knoten im Fluss: Jeder Kanal gibt seinen Zähler an das Gerät darunter weiter, bei mehrpoligen an den passenden Pol."),
+      h("div", { class: "grid2" },
+        this.text("Bezeichnung im Kasten", m, "label", { placeholder: "P1, Q1 …" }),
+        this.select("Anbauort", m, "mount", [["top", "über der Reihe"], ["bottom", "unter der Reihe"]])),
+      this.shellyModuleField(m, []),
+      h("div", { class: "channels" },
+        h("div", { class: "sec-title" }, `Kanäle (${m.meters.length})`),
+        ...m.meters.map((_, i) => channel(i)),
+        h("div", { class: "row wrap" },
+          h("button", { class: "chip", onclick: () => setCount(m.meters.length + 1) }, "+ Kanal"),
+          m.meters.length > 1 ? h("button", { class: "chip", onclick: () => setCount(m.meters.length - 1) }, "− Kanal") : null)),
+      h("details", { class: "sec" },
+        h("summary", {}, "Einbau und Modell"),
+        h("div", { class: "grid4" },
+          this.number("Breite (TE)", m, "width", { min: 1, max: 12 }),
+          this.number("Reihe", m, "row", { min: 1, offset: 1 }),
+          this.number("Platz", m, "slot", { min: 1, offset: 1 })),
+        this.text("Hersteller / Modell", m, "model", { placeholder: "z. B. Shelly 3EM-63 Gen3" })),
+      this.text("Notizen", m, "notes", { multiline: true, placeholder: "Notiz …" }),
+      h("div", { class: "row end" },
+        h("button", { class: "chip danger", onclick: () => this.p.removeModule(m.id) }, icon(MDI.del, 16), " Anbaugerät entfernen")));
   }
 
   // »Gespeist von«: vorgelagertes Gerät aus einem beliebigen Kasten, die Kasten-Einspeisung oder nichts

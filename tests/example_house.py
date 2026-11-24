@@ -41,6 +41,12 @@ def build() -> dict:
          "row": 1, "slot": 3, "rating": 16, "curve": "C"},
         {"id": "hv_k1", "cabinet": cab_hv, "type": "relay", "label": "K1", "width": 1, "poles": 4,
          "row": 1, "slot": 5, "model": "Shelly Pro 4PM", "device": SHELLY_DEV},
+        # Anbaugeräte: 3EM-63 unter dem Herd-LS, CT-Klemme über dem Schlafzimmer-LS
+        {"id": "hv_p1", "cabinet": cab_hv, "type": "meter", "label": "P1", "width": 3, "poles": 3, "row": 1, "slot": 0,
+         "mount": "bottom", "model": "Shelly 3EM-63 Gen3",
+         "meters": [_p("herd_3em_phase_a"), _p("herd_3em_phase_b"), _p("herd_3em_phase_c")]},
+        {"id": "hv_p2", "cabinet": cab_hv, "type": "meter", "label": "P2", "width": 1, "poles": 1, "row": 0, "slot": 7,
+         "mount": "top", "model": "Stromwandler", "meters": [_p("schlafzimmer_ct")]},
         {"id": "uv1_f01", "cabinet": cab_uv, "type": "rcbo", "label": "F01", "width": 2, "poles": 1,
          "row": 0, "slot": 0, "rating": 16, "curve": "B", "rcd_ma": 30},
         {"id": "uv1_f02", "cabinet": cab_uv, "type": "breaker", "label": "F02", "width": 1, "poles": 1,
@@ -94,7 +100,7 @@ def build() -> dict:
     # Herd: 3-poliger LS, ein Knoten je Pol
     for ch, ph in enumerate("ABC", start=1):
         node(f"herd_l{ch}", "grid", "breaker", f"Herd L{ch}", module="hv_f07", channel=ch, phase=ph,
-             area="kueche", meter=_p(f"herd_l{ch}"))
+             area="kueche")  # Zähler kommt vom aufgeschraubten 3EM-63 (Anbaugerät unten)
 
     # Shelly Pro 4PM als Relais vor einzelnen Abgängen
     node("garage_zuleitung", "grid", "breaker", "Zuleitung Garage", module="hv_f08", channel=1, phase="B",

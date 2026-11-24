@@ -6,6 +6,10 @@ import { MDI, MODULE_TYPE_LABEL, NEUTRAL, PHASE_LABEL, fmtW, h, icon, num } from
 const TE = 46;
 const ROW_H = 222;
 const MOD_H = 186;
+// Anbauzonen über und unter jeder Reihe (etwa 1 TE hoch), nur im Bearbeitungsmodus aufgeklappt
+const ZONE = 46;
+const ZGAP = 6;
+const ROW_H_EDIT = MOD_H + 2 * (ZONE + ZGAP) + 36;
 
 export class CabinetView {
   constructor(panel) {
@@ -96,6 +100,18 @@ export class CabinetView {
     });
   }
 
+  get rowH() {
+    return this.p.editing ? ROW_H_EDIT : ROW_H;
+  }
+
+  rowTop(r) {
+    return r * this.rowH + 12 + (this.p.editing ? ZONE + ZGAP : 0);
+  }
+
+  zoneTop(r, mount) {
+    return mount === "top" ? this.rowTop(r) - ZGAP - ZONE : this.rowTop(r) + MOD_H + ZGAP;
+  }
+
   render() {
     const net = this.p.net;
     const cabs = this.p.data.cabinets;
@@ -135,26 +151,41 @@ export class CabinetView {
           h("button", { class: "icon-btn small", "aria-label": "Vergrößern", onclick: () => this.setZoom((this.zoom ?? 1) * 1.2) }, icon(MDI.plus, 16)))));
 
     const board = h("div", { class: `board${this.p.editing ? " editing" : ""}`,
-      style: { width: `${cab.width * TE + 72}px`, height: `${cab.rows * ROW_H + 24}px`, zoom: String(this.zoom ?? 1) } });
+      style: { width: `${cab.width * TE + 72}px`, height: `${cab.rows * this.rowH + 24}px`, zoom: String(this.zoom ?? 1) } });
     for (let r = 0; r < cab.rows; r++) {
-      board.append(h("div", { class: "rail", style: { top: `${r * ROW_H + 12 + MOD_H / 2 - 12}px`, width: `${cab.width * TE}px` } }));
-      board.append(h("div", { class: "row-label", style: { top: `${r * ROW_H + 12 + MOD_H / 2 - 8}px` } }, `R${r + 1}`));
+      board.append(h("div", { class: "rail", style: { top: `${this.rowTop(r) + MOD_H / 2 - 12}px`, width: `${cab.width * TE}px` } }));
+      board.append(h("div", { class: "row-label", style: { top: `${this.rowTop(r) + MOD_H / 2 - 8}px` } }, `R${r + 1}`));
       if (this.p.editing) {
         const occ = net.occupied(cab.id);
         for (let s = 0; s < cab.width; s++) {
           if (occ.has(`${r}:${s}`)) continue;
           board.append(h("button", {
             class: "slot", title: `Reihe ${r + 1}, Platz ${s + 1}: Gerät hinzufügen`, "aria-label": `Reihe ${r + 1}, Platz ${s + 1}: Gerät hinzufügen`,
-            style: { left: `${48 + s * TE}px`, top: `${r * ROW_H + 12}px`, width: `${TE - 4}px`, height: `${MOD_H}px` },
+            style: { left: `${48 + s * TE}px`, top: `${this.rowTop(r)}px`, width: `${TE - 4}px`, height: `${MOD_H}px` },
             onclick: (e) => { e.stopPropagation(); this.addMenu(e, cab.id, r, s); },
           }, "+"));
+        }
+        // Anbauzonen: jede freie TE-Stelle nimmt ein Anbaugerät auf
+        for (const mount of ["top", "bottom"]) {
+          const top = this.zoneTop(r, mount);
+          board.append(h("div", { class: "zone", style: { left: "46px", top: `${top - 2}px`, width: `${cab.width * TE}px`, height: `${ZONE + 4}px` } }));
+          const zocc = net.occupied(cab.id, null, mount);
+          for (let s = 0; s < cab.width; s++) {
+            if (zocc.has(`${r}:${s}`)) continue;
+            const where = `${mount === "top" ? "Über" : "Unter"} Reihe ${r + 1}, Platz ${s + 1}`;
+            board.append(h("button", {
+              class: "slot zslot", title: `${where}: Anbaugerät hinzufügen`, "aria-label": `${where}: Anbaugerät hinzufügen`,
+              style: { left: `${48 + s * TE}px`, top: `${top}px`, width: `${TE - 4}px`, height: `${ZONE}px` },
+              onclick: (e) => { e.stopPropagation(); this.p.openMountPicker(cab.id, { row: r, slot: s, mount }); },
+            }, "+"));
+          }
         }
       }
     }
     const unplaced = [];
     for (const m of this.p.data.modules.filter((x) => x.cabinet === cab.id)) {
       if (m.row === null || m.slot === null) unplaced.push(m);
-      else board.append(this.module(m));
+      else board.append(m.mount ? this.mountEl(m) : this.module(m));
     }
     const legend = h("div", { class: "legend" },
       ...Object.entries(PHASE_LABEL).map(([p, l]) => h("span", {}, h("i", { style: { background: this.p.data.settings.colors[p] ?? "#7d8a96" } }), l)),
@@ -198,7 +229,7 @@ export class CabinetView {
       : null;
     const el = h("div", {
       class: `module type-${m.type}${selected ? " selected" : ""}${width > 60 ? " wide" : ""}${colors.length === 1 ? " tinted" : ""}`,
-      style: { left: `${48 + m.slot * TE}px`, top: `${m.row * ROW_H + 12}px`, width: `${width}px`, height: `${MOD_H}px`,
+      style: { left: `${48 + m.slot * TE}px`, top: `${this.rowTop(m.row)}px`, width: `${width}px`, height: `${MOD_H}px`,
                "--stripe": stripe, ...(colors.length === 1 ? { "--tint": colors[0] } : {}) },
       title: [net.moduleTitle(m), m.model, phases.length ? phases.map((p) => PHASE_LABEL[p]).join("/") : null, rcd ? `über ${rcd.label}` : null].filter(Boolean).join(" · "),
     },
@@ -208,6 +239,38 @@ export class CabinetView {
       m.type === "rcd" ? h("span", { class: "mval muted" }, m.rcd_ma ? `${m.rating ? `${m.rating} A · ` : ""}${m.rcd_ma} mA` : "FI") : val);
     el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));
     this.bindDrag(el, m);
+    return el;
+  }
+
+  // Anbaugerät: im Bearbeitungsmodus als Kästchen in seiner Zone, sonst als schmale Leiste am Gerät
+  mountEl(m) {
+    const net = this.p.net;
+    const sel = this.p.selection;
+    const selected = sel?.type === "module" && sel.id === m.id;
+    const width = (m.width || 1) * TE - 4;
+    const targets = net.mountTargets(m);
+    const under = [...new Set(targets.map((t) => t.module).filter(Boolean))].map((id) => net.modules.get(id)?.label).filter(Boolean);
+    const title = [net.moduleTitle(m), m.model, `${m.mount === "top" ? "oben" : "unten"} an ${under.join(", ") || "–"}`,
+      `${(m.meters ?? []).filter(Boolean).length}/${(m.meters ?? []).length} Zähler`].filter(Boolean).join(" · ");
+    const left = `${48 + m.slot * TE}px`;
+    let el;
+    if (this.p.editing) {
+      const val = h("span", { class: "mval" });
+      this.live.push({ el: val, get: () => {
+        const vals = (m.meters ?? []).map((e) => num(this.p.hass, e)).filter((v) => v !== null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      } });
+      el = h("div", { class: `mount${selected ? " selected" : ""}${width > 60 ? " wide" : ""}`, title,
+        style: { left, top: `${this.zoneTop(m.row, m.mount)}px`, width: `${width}px`, height: `${ZONE}px` } },
+        h("b", { class: "mlabel" }, m.label || "?"), width > 60 ? h("span", { class: "mname" }, m.model ?? "") : null, val);
+      this.bindDrag(el, m);
+    } else {
+      const top = m.mount === "top" ? this.rowTop(m.row) - 7 : this.rowTop(m.row) + MOD_H + 3;
+      el = h("button", { class: `mount-bar${selected ? " selected" : ""}`, title, "aria-label": title,
+        style: { left, top: `${top}px`, width: `${width}px` },
+        onclick: (e) => { e.stopPropagation(); this.p.select({ type: "module", id: m.id }); } });
+    }
+    el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));
     return el;
   }
 
@@ -243,7 +306,7 @@ export class CabinetView {
       let moved = false;
       const z = this.zoom ?? 1;
       if (this.p.editing) try { el.setPointerCapture(e.pointerId); } catch { /* Zeiger schon weg */ }
-      const target = () => ({ slot: m.slot + Math.round((lastX - sx) / (TE * z)), row: m.row + Math.round((lastY - sy) / (ROW_H * z)) });
+      const target = () => ({ slot: m.slot + Math.round((lastX - sx) / (TE * z)), row: m.row + Math.round((lastY - sy) / (this.rowH * z)) });
       let lastX = sx, lastY = sy;
       const move = (ev) => {
         lastX = ev.clientX;
@@ -253,7 +316,7 @@ export class CabinetView {
         moved = true;
         el.style.transform = `translate(${(lastX - sx) / z}px, ${(lastY - sy) / z}px)`;
         const t = target();
-        el.classList.toggle("blocked", !this.p.net.fits(m.cabinet, t.row, t.slot, m.width || 1, m.id));
+        el.classList.toggle("blocked", !this.p.net.fits(m.cabinet, t.row, t.slot, m.width || 1, m.id, m.mount ?? null));
       };
       const up = (ev) => {
         el.removeEventListener("pointermove", move);
@@ -269,7 +332,7 @@ export class CabinetView {
           return;
         }
         const t = target();
-        if (this.p.net.fits(m.cabinet, t.row, t.slot, m.width || 1, m.id)) {
+        if (this.p.net.fits(m.cabinet, t.row, t.slot, m.width || 1, m.id, m.mount ?? null)) {
           m.row = t.row;
           m.slot = t.slot;
           this.p.changed();

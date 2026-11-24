@@ -55,7 +55,7 @@ export function labelSettings(panel) {
 
 // Zellen einer Reihe: Geräte und Lücken, je mit Start-TE und Breite
 function rowCells(panel, cab, r) {
-  const mods = panel.data.modules.filter((m) => m.cabinet === cab.id && m.row === r).sort((a, b) => a.slot - b.slot);
+  const mods = panel.data.modules.filter((m) => m.cabinet === cab.id && m.row === r && !m.mount).sort((a, b) => a.slot - b.slot);
   const cells = [];
   let slot = 0;
   for (const m of mods) {
@@ -214,7 +214,7 @@ export function printOverview(panel, cabId, orientation = "landscape") {
   const portrait = orientation === "portrait";
   const net = panel.net;
   const cab = net.cabinets.get(cabId);
-  const mods = panel.data.modules.filter((m) => m.cabinet === cabId);
+  const mods = panel.data.modules.filter((m) => m.cabinet === cabId && !m.mount);
   const te = Math.min(12, (portrait ? 170 : 250) / cab.width); // mm je TE, passt auf die Seitenbreite
   const modH = 30, rowH = 38;
   let board = "";

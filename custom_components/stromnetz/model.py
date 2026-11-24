@@ -90,7 +90,8 @@ def normalize(data: dict) -> dict:
         c.setdefault("area", None)
         c.setdefault("notes", None)
     for m in d["modules"]:
-        for f in ("row", "slot", "label", "model", "poles", "rating", "curve", "rcd", "rcd_ma", "notes", "device"):
+        for f in ("row", "slot", "label", "model", "poles", "rating", "curve", "rcd", "rcd_ma", "notes", "device",
+                  "mount", "meters"):
             m.setdefault(f, None)
         m.setdefault("width", 1)
         m.setdefault("type", "breaker")
@@ -170,6 +171,8 @@ class Netz:
             self.children.setdefault(n["parent"], []).append(n["id"])
         self._validate()
         if not self.errors:
+            self._apply_mounts()
+        if not self.errors:
             self.addresses = {nid: self._address(nid) for nid in self.nodes}
             dup = {}
             for nid, a in self.addresses.items():
@@ -207,10 +210,16 @@ class Netz:
                 err(f"Modul {m['label'] or m['id']}: Charakteristik {m['curve']} unbekannt")
             if m["rcd"] is not None and m["rcd"] not in self.modules:
                 err(f"Modul {m['label'] or m['id']}: FI {m['rcd']} fehlt")
+            if m["mount"] not in (None, "top", "bottom"):
+                err(f"Modul {m['label'] or m['id']}: Anbauort {m['mount']} unbekannt")
+            for e in m["meters"] or []:
+                if e and not ENTITY_RE.match(e):
+                    err(f"Modul {m['label'] or m['id']}: Zähler {e} ist keine entity_id")
             if m["row"] is not None and m["slot"] is not None:
                 cab = self.cabinets[m["cabinet"]]
                 for i in range(int(m["width"] or 1)):
-                    key = (m["cabinet"], m["row"], m["slot"] + i)
+                    # Anbaugeräte belegen die Zone über bzw. unter der Reihe, nicht die Hutschiene
+                    key = (m["cabinet"], m["row"], m["mount"], m["slot"] + i)
                     if m["slot"] + i >= cab["width"] or m["row"] >= cab["rows"]:
                         err(f"Modul {m['label'] or m['id']} ragt aus Kasten {cab['code']}")
                         break
@@ -271,6 +280,54 @@ class Netz:
                 if key in chans:
                     err(f"Modul {n['module']}: Kanal {n['channel']} doppelt ({chans[key]}, {n['id']})")
                 chans[key] = n["id"]
+
+    # ── Anbaugeräte ──────────────────────────────────────────────────────────
+    def mount_targets(self, m: dict) -> list[tuple[int, str | None, str | None]]:
+        """(Kanalindex, Zähler, Zielknoten) eines Anbaugeräts: Kanal i liegt über der TE
+        slot + i·Breite/Kanäle; Ziel ist der Kanal des Hutschienengeräts darunter."""
+        meters = m.get("meters") or []
+        if m.get("mount") is None or m.get("row") is None or m.get("slot") is None or not meters:
+            return []
+        width = int(m.get("width") or 1)
+        out = []
+        for i, ent in enumerate(meters):
+            te = m["slot"] + (i * width) // len(meters)
+            target = None
+            for x in self.data["modules"]:
+                if (x["cabinet"] == m["cabinet"] and x["mount"] is None and x["row"] == m["row"]
+                        and x["slot"] is not None and x["slot"] <= te < x["slot"] + int(x["width"] or 1)):
+                    chans = sorted((n for n in self.nodes.values() if n["module"] == x["id"]), key=lambda n: n["channel"] or 0)
+                    xw = int(x["width"] or 1)
+                    # je Pol 1 TE (z. B. 3+N auf 4 TE: N ohne Kanal); mehr Kanäle als TE: anteilig
+                    k = te - x["slot"] if xw >= len(chans) else (te - x["slot"]) * len(chans) // xw
+                    if chans and k < len(chans):
+                        target = chans[k]["id"]
+                    break
+            out.append((i, ent, target))
+        return out
+
+    def _apply_mounts(self) -> None:
+        """Zähler von Anbaugeräten auf die Kanäle darunter legen (nur hier, nicht in den Daten)."""
+        used = {n["meter"] for n in self.nodes.values() if n["meter"]}
+        used |= {g.get("meter") for g in self.data["grid"]["phases"].values() if g.get("meter")}
+        for m in self.data["modules"]:
+            name = m["label"] or m["id"]
+            for i, ent, target in self.mount_targets(m):
+                if not ent:
+                    continue
+                if target is None:
+                    self.warnings.append(f"Anbaugerät {name}, Kanal {i + 1}: kein Gerät darunter")
+                    continue
+                node = self.nodes[target]
+                if node["meter"]:
+                    if node["meter"] != ent:
+                        self.warnings.append(f"Anbaugerät {name}, Kanal {i + 1}: {target} hat schon einen eigenen Zähler")
+                    continue
+                if ent in used:
+                    self.errors.append(f"Zähler {ent} von Anbaugerät {name} ist schon anderswo zugeordnet")
+                    continue
+                used.add(ent)
+                self.nodes[target] = {**node, "meter": ent, "meter_from": m["id"]}
 
     # ── Vererbung ────────────────────────────────────────────────────────────
     def ancestors(self, nid: str):

@@ -125,6 +125,15 @@ export const CATALOG = [
     ],
   },
   {
+    // Anbaugeräte sitzen über oder unter einer Hutschienenreihe und messen die Geräte darunter
+    key: "mount", name: "Anbaugeräte", mount: true, groups: [
+      { name: "Messung", items: [
+        { key: "s3em63", name: "Shelly 3EM-63 Gen3", sub: "3 Phasen bis 63 A, wird auf die Sicherungen geschraubt", type: "meter", model: "Shelly 3EM-63 Gen3", width: 3, channels: 3, mount: true },
+        { key: "ct1", name: "Stromwandler / CT-Klemme", sub: "1 Phase, z. B. Emporia Vue oder Shelly Pro 3EM", type: "meter", model: "Stromwandler", width: 1, channels: 1, mount: true },
+      ] },
+    ],
+  },
+  {
     key: "other", name: "Sonstiges", groups: [
       { name: "Weitere Geräte", items: [
         { key: "spd", name: "Überspannungsschutz", sub: "4 TE, ohne Kanal", type: "other", model: "Überspannungsschutz", width: 4, poles: 4, channels: 0 },
