@@ -433,7 +433,14 @@ class StromnetzPanel extends HTMLElement {
     const m = this.net.modules.get(id);
     this.menu(e.clientX, e.clientY, [
       { label: "Eigenschaften …", icon: MDI.pencil, action: () => this.select({ type: "module", id }) },
-      { label: "Kanal hinzufügen", icon: MDI.plus, disabled: m.type === "rcd", action: () => this.addChannel(id) },
+      { label: "Kanal hinzufügen", icon: MDI.plus, disabled: m.type === "rcd",
+        action: () => {
+          if (!m.mount) return this.addChannel(id);
+          // Anbaugerät: nur einen weiteren Zählerplatz, kein Knoten im Fluss
+          m.meters = [...(m.meters ?? []), null];
+          m.poles = m.meters.length;
+          this.changed();
+        } },
       { label: "In anderen Kasten verschieben …", icon: MDI.move, disabled: this.data.cabinets.length < 2,
         action: () => setTimeout(() => this.moveMenu(e, id)) },
       { label: "Im Fluss zeigen", icon: MDI.link, disabled: !(this.net.moduleNodes.get(id) ?? []).length,
