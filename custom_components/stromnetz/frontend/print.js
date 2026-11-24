@@ -44,7 +44,7 @@ ${css}
 }
 
 // ── Beschriftung auf Etikettenpapier (z. B. Avery Zweckform 6603, A4 1-fach) ──
-export const LABEL_DEFAULTS = { te: 17.75, height: 15, margin: 5 };
+export const LABEL_DEFAULTS = { te: 17.75, height: 15, margin: 6 };
 
 export function labelSettings(panel) {
   const s = panel.data.settings ?? {};
@@ -180,15 +180,18 @@ export function printLabelSheets(panel, selection, orientation = "auto", calib =
       <div class="bar" style="width:100mm"><span>100 mm</span></div>
       <div class="bar te" style="width:${10 * te}mm"><span>10 TE = ${(10 * te).toFixed(1).replace(".", ",")} mm</span></div>
     </div>`;
-  const pages = plan.sheets.map((items) => `<div class="page">${items.map((s) => `
+  const pages = plan.sheets.map((items) => `<div class="page"><div class="area">${items.map((s) => `
     <div class="item" style="left:${s.x}mm;top:${s.y}mm;width:${s.w}mm">
       <div class="rl">${esc(s.title)}</div>
       ${s.calib ? calibHtml(s.w) : `<div class="strip" style="height:${height}mm">${s.html()}</div>`}
-    </div>`).join("")}</div>`).join("");
+    </div>`).join("")}</div></div>`).join("");
   const css = `
-@page { size: A4 ${plan.orientation}; margin: ${margin}mm; }
+@page { size: A4 ${plan.orientation}; margin: 0; }
 @media screen { body { padding: 10mm; background: #f2f2f2; } .page { background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.2); margin-bottom: 8mm; } }
-.page { position: relative; width: ${plan.W}mm; height: ${plan.H}mm; overflow: hidden; break-after: page; }
+/* Seite ohne Druckrand (sonst skaliert der Drucker das Blatt herunter); der Blattrand wird hier
+   als Einzug umgesetzt, damit nichts im nicht bedruckbaren Bereich landet */
+.page { position: relative; width: ${plan.W + 2 * margin}mm; height: ${plan.H + 2 * margin - 0.5}mm; overflow: hidden; break-after: page; }
+.area { position: absolute; left: ${margin}mm; top: ${margin}mm; width: ${plan.W}mm; height: ${plan.H}mm; }
 .page:last-child { break-after: auto; }
 .item { position: absolute; }
 .rl { height: ${HEAD}mm; font-size: 6.5pt; line-height: ${HEAD}mm; color: #777; white-space: nowrap; overflow: hidden; }

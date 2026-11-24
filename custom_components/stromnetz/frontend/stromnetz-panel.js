@@ -887,9 +887,9 @@ class StromnetzPanel extends HTMLElement {
           h("label", { class: "lbl-num" }, h("span", {}, "Ausrichtung"), orient),
           num("mm pro TE", "label_te_mm", LABEL_DEFAULTS.te, "Am eigenen Verteiler messen: Breite von z. B. 20 TE geteilt durch 20"),
           num("Streifenhöhe (mm)", "label_height_mm", LABEL_DEFAULTS.height),
-          num("Blattrand (mm)", "label_margin_mm", LABEL_DEFAULTS.margin, "Nicht bedruckbarer Rand des Druckers"),
+          num("Blattrand (mm)", "label_margin_mm", LABEL_DEFAULTS.margin, "Abstand der Streifen zur Blattkante; mindestens so groß wie der nicht bedruckbare Rand des Druckers"),
           h("label", { class: "lbl-row" }, cal, "Kalibrierstreifen mitdrucken"),
-          h("p", { class: "muted small" }, "Lange Reihen werden zwischen zwei Geräten geteilt. Beim Drucken »Tatsächliche Größe / 100 %« wählen. Passt der Kalibrierstreifen nicht genau auf 100 mm, »mm pro TE« entsprechend anpassen."))),
+          h("p", { class: "muted small" }, "Im Druckdialog »Ränder: Keine« und »Skalierung: 100 %« wählen; den Abstand zum Blattrand übernimmt »Blattrand«. Passt der Kalibrierstreifen danach nicht genau auf 100 mm, »mm pro TE« anpassen."))),
       h("div", { class: "pk-foot lbl-foot" }, summary,
         h("button", { class: "btn primary", onclick: () => {
           const plan = printLabelSheets(this, sel, orientation, calib);
