@@ -17,6 +17,11 @@ function loadCollapsed() {
   }
 }
 
+const sum = (vals) => {
+  const v = vals.filter((x) => x !== null && x !== undefined);
+  return v.length ? v.reduce((a, b) => a + b, 0) : null;
+};
+
 export class FlowView {
   constructor(panel) {
     this.p = panel;
@@ -81,18 +86,63 @@ export class FlowView {
     }
   }
 
+  get total() {
+    return this.groupMode === "total";
+  }
+
   groupKey(rootId) {
     const net = this.p.net;
     const cab = net.cabinetOf(rootId) ?? "-";
-    return this.groupMode === "cabinet" ? `grp:${cab}:*` : `grp:${cab}:${net.phase(rootId) ?? "?"}`;
+    return this.groupMode !== "phase" ? `grp:${cab}:*` : `grp:${cab}:${net.phase(rootId) ?? "?"}`;
+  }
+
+  // Gesamt-Ansicht: Kanäle eines mehrpoligen Geräts (LS, FI, FI/LS, Mehrphasen-Zähler) als ein Knoten.
+  // Schütze werden zusammengefasst; Relais-Module wie der Shelly Pro 4PM bleiben getrennt,
+  // ihre Kanäle sind eigene Stromkreise.
+  mergeKeyOf(id) {
+    const net = this.p.net;
+    const n = net.nodes.get(id);
+    const m = n?.module ? net.modules.get(n.module) : null;
+    if (!m) return null;
+    const chNodes = net.moduleNodes.get(m.id) ?? [];
+    const channels = chNodes.length;
+    // Schütz: alle Pole hängen an einem Schalter; Shelly-Relais haben je Kanal einen eigenen
+    const oneSwitch = new Set(chNodes.map((c) => c.switch ?? null)).size <= 1;
+    const multi = (["breaker", "rcd", "rcbo"].includes(m.type) && (m.poles ?? 1) > 1 && channels > 1)
+      || (m.type === "meter" && channels > 1)
+      || (m.type === "relay" && channels > 1 && !m.device && !/shelly/i.test(m.model ?? "") && oneSwitch);
+    return multi ? m.id : null;
+  }
+
+  // [[primär, [mitglieder]]] – außerhalb der Gesamt-Ansicht jeder Knoten für sich
+  mergeIds(ids) {
+    if (!this.total) return ids.map((id) => [id, [id]]);
+    const net = this.p.net;
+    const out = [], byMod = new Map();
+    for (const id of ids) {
+      const k = this.mergeKeyOf(id);
+      if (!k) { out.push([id, [id]]); continue; }
+      if (byMod.has(k)) byMod.get(k)[1].push(id);
+      else { const e = [id, [id]]; byMod.set(k, e); out.push(e); }
+    }
+    for (const e of out) {
+      if (e[1].length < 2) continue;
+      e[1].sort((a, b) => (net.nodes.get(a).channel ?? 0) - (net.nodes.get(b).channel ?? 0));
+      e[0] = e[1][0];
+    }
+    return out;
+  }
+
+  membersOf(id) {
+    return this.mergedMembers?.get(id) ?? [id];
   }
 
   groupSwitch() {
     const wrap = h("div", { class: "segment wheel group-mode", role: "group", "aria-label": "Gliederung",
-      title: "Unter dem Netzanschluss nach Kasten und Phase oder nur nach Kasten gliedern" });
+      title: "Phasen: je Kasten und Phase · Kästen: nur je Kasten · Gesamt: mehrpolige Geräte als ein Knoten, ohne Phasen" });
     const draw = () => {
       wrap.replaceChildren(h("span", { class: "wl" }, "Gliederung"),
-        ...[["phase", "Phasen"], ["cabinet", "Kästen"]].map(([k, l]) => h("button", {
+        ...[["phase", "Phasen"], ["cabinet", "Kästen"], ["total", "Gesamt"]].map(([k, l]) => h("button", {
           class: this.groupMode === k ? "active" : "", "aria-pressed": this.groupMode === k ? "true" : "false",
           onclick: () => {
             if (this.groupMode === k) return;
@@ -143,7 +193,16 @@ export class FlowView {
   // ── Anzeige-Baum ───────────────────────────────────────────────────────────
   buildTree() {
     const net = this.p.net;
-    const item = (id) => ({ key: id, type: "node", id, children: [] });
+    this.mergedMembers = new Map();
+    this.mergedPrimary = new Map();
+    const item = (id, ids = [id]) => {
+      if (ids.length > 1) {
+        this.mergedMembers.set(id, ids);
+        ids.forEach((m) => this.mergedPrimary.set(m, id));
+      }
+      return { key: id, type: "node", id, ids, children: [] };
+    };
+    const items = (ids) => this.mergeIds(ids).map(([p, ms]) => fill(item(p, ms)));
     // Nicht verbundene Kanäle eines Geräts erscheinen bei ihrem Kasten (gestrichelt), nicht ganz unten
     const looseByCab = new Map();
     for (const id of net.kids(null)) {
@@ -157,17 +216,17 @@ export class FlowView {
     const looseItems = (cab) => {
       const ids = (looseByCab.get(cab) ?? []).filter((id) => !placed.has(id));
       ids.forEach((id) => placed.add(id));
-      return ids.map((id) => ({ ...fill(item(id)), loose: true }));
+      return items(ids).map((it) => ({ ...it, loose: true }));
     };
     const fill = (it) => {
       if (this.collapsed.has(it.key)) {
-        it.hidden = this.countDesc(it.id ?? null, it);
+        it.hidden = (it.ids ?? [it.id ?? null]).reduce((a, id) => a + this.countDesc(id), 0);
         return it;
       }
       if (it.type === "node") {
         // Geräte eines Unterverteilers, der an diesem Knoten hängt, unter einer eigenen Kasten-Karte bündeln
         const own = [], sub = new Map();
-        for (const c of net.kids(it.id)) {
+        for (const c of it.ids.flatMap((x) => net.kids(x))) {
           const cn = net.nodes.get(c);
           const cab = cn.module ? net.modules.get(cn.module)?.cabinet : null;
           if (cab && cab !== net.cabinetOf(it.id)) {
@@ -180,13 +239,15 @@ export class FlowView {
             const key = `cab:${cab}:${it.id}`;
             const g = { key, type: "subcab", cabinet: cab, parentId: it.id, members, children: [] };
             if (this.collapsed.has(key)) g.hidden = members.length + (looseByCab.get(cab)?.length ?? 0);
-            else g.children = [...members.map((c) => fill(item(c))), ...looseItems(cab)];
+            else g.children = [...items(members), ...looseItems(cab)];
             return g;
           }),
-          ...own.map((c) => fill(item(c))),
+          ...items(own),
         ];
-        const rest = net.sensorsOf(it.id).rest;
-        if (rest && it.children.length) it.children.push({ key: `${it.id}:rest`, type: "rest", entity: rest, parent: it.id, children: [] });
+        const rests = it.ids.map((x) => net.sensorsOf(x).rest).filter(Boolean);
+        if (rests.length && it.children.length) {
+          it.children.push({ key: `${it.id}:rest`, type: "rest", entity: rests[0], entities: rests, parent: it.id, children: [] });
+        }
       }
       return it;
     };
@@ -195,39 +256,47 @@ export class FlowView {
       const cab = net.cabinetOf(id);
       const ph = net.phase(id);
       const key = this.groupKey(id);
-      const byCab = this.groupMode === "cabinet";
+      const byCab = this.groupMode !== "phase";
       if (!groups.has(key)) groups.set(key, { key, type: "group", cabinet: cab, phase: byCab ? null : ph, allPhases: byCab, members: [], children: [] });
       groups.get(key).members.push(id);
     }
     const cabOrder = (c) => { const i = this.p.data.cabinets.findIndex((x) => x.id === c); return i < 0 ? 99 : i; };
-    const order = (g) => this.groupMode === "cabinet"
+    const order = (g) => this.groupMode !== "phase"
       ? cabOrder(g.cabinet)
       : (g.phase ? PHASES.indexOf(g.phase) : 9) * 100 + (g.cabinet ? cabOrder(g.cabinet) : 50);
     const root = { key: "grid", type: "grid", children: [] };
     const sorted = [...groups.values()].sort((a, b) => order(a) - order(b));
     for (const g of sorted) {
-      if (this.collapsed.has(g.key)) g.hidden = g.members.length;
-      else g.children = g.members.map((id) => fill(item(id)));
+      if (this.collapsed.has(g.key)) g.hidden = this.mergeIds(g.members).length;
+      else g.children = items(g.members);
       root.children.push(g);
     }
     // Restliche nicht verbundene Kanäle an die Gruppe ihres Kastens hängen (passende Phase bevorzugt)
     for (const [cab, ids] of looseByCab) {
+      const byGroup = new Map();
       for (const id of ids) {
         if (placed.has(id)) continue;
         const ph = net.phase(id);
         const g = sorted.find((x) => x.cabinet === cab && (x.allPhases || x.phase === ph)) ?? sorted.find((x) => x.cabinet === cab);
         if (!g || this.collapsed.has(g.key)) continue;
         placed.add(id);
-        g.children.push({ ...fill(item(id)), loose: true });
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g).push(id);
       }
+      for (const [g, gids] of byGroup) g.children.push(...items(gids).map((it) => ({ ...it, loose: true })));
     }
-    for (const p of PHASES) {
-      const e = net.gridRestEntity(p);
-      if (e) root.children.push({ key: `grid:rest:${p}`, type: "rest", entity: e, phase: p, children: [], gridRest: true });
+    if (this.total) {
+      const es = PHASES.map((p) => net.gridRestEntity(p)).filter(Boolean);
+      if (es.length) root.children.push({ key: "grid:rest", type: "rest", entity: es[0], entities: es, children: [], gridRest: true });
+    } else {
+      for (const p of PHASES) {
+        const e = net.gridRestEntity(p);
+        if (e) root.children.push({ key: `grid:rest:${p}`, type: "rest", entity: e, phase: p, children: [], gridRest: true });
+      }
     }
     const loose = net.kids(null).filter((id) => !placed.has(id));
     const extra = loose.length
-      ? { key: "loose", type: "loose", children: this.collapsed.has("loose") ? [] : loose.map((id) => fill(item(id))), hidden: this.collapsed.has("loose") ? loose.length : 0 }
+      ? { key: "loose", type: "loose", children: this.collapsed.has("loose") ? [] : items(loose), hidden: this.collapsed.has("loose") ? loose.length : 0 }
       : null;
     return { root, extra };
   }
@@ -336,6 +405,7 @@ export class FlowView {
     } else if (parent.type === "group") phase = parent.phase;
     else if (parent.type === "node") phase = net.phase(parent.id);
     else if (parent.type === "subcab") phase = net.phase(parent.parentId);
+    if (this.total && parent.type !== "grid") phase = null;
     const x1 = parent.x + W, x2 = child.x, y2 = child.y + child.h / 2;
     const mx = Math.min(x1 + GAP / 2, x2 - 8);
     const colored = child.type === "group" || child.type === "subcab" || child.gridRest
@@ -373,9 +443,9 @@ export class FlowView {
         return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
       }
       case "rest":
-        return num(hass, it.entity);
+        return it.entities ? sum(it.entities.map((e) => num(hass, e))) : num(hass, it.entity);
       case "node":
-        return net.value(it.id, hass);
+        return it.ids?.length > 1 ? sum(it.ids.map((id) => net.value(id, hass))) : net.value(it.id, hass);
       default:
         return null;
     }
@@ -429,28 +499,31 @@ export class FlowView {
       el.addEventListener("dblclick", () => this.toggle("loose"));
     } else if (it.type === "rest") {
       const v = h("span", { class: "val" });
-      this.live.push({ kind: "text", el: v, get: () => num(this.p.hass, it.entity) });
+      this.live.push({ kind: "text", el: v, get: () => this.itemValue(it) });
       el = h("div", { ...base, class: "card rest-card" },
-        h("div", { class: "txt" }, h("div", { class: "title" }, it.gridRest ? `${PHASE_LABEL[it.phase]} nicht erfasst` : "Sonstiges"),
+        h("div", { class: "txt" }, h("div", { class: "title" }, it.gridRest ? (it.phase ? `${PHASE_LABEL[it.phase]} nicht erfasst` : "Nicht erfasst") : "Sonstiges"),
           h("div", { class: "sub" }, it.gridRest ? "Zuleitung ohne Messung" : "Rest ohne eigenen Zähler")), v);
       el.addEventListener("click", () => this.p.moreInfo(it.entity));
     } else {
       const n = net.nodes.get(it.id);
-      const phase = net.phase(it.id);
-      const v = h("span", { class: "val", style: n.module || n.kind === "breaker" ? { color: this.phaseColor(phase) } : {} });
-      this.live.push({ kind: "text", el: v, get: () => net.value(it.id, this.p.hass) });
+      const merged = it.ids?.length > 1;
+      const phase = this.total ? null : net.phase(it.id);
+      const v = h("span", { class: "val", style: (n.module || n.kind === "breaker") && phase ? { color: this.phaseColor(phase) } : {} });
+      this.live.push({ kind: "text", el: v, get: () => this.itemValue(it) });
       const parent = n.parent && n.parent !== GRID ? n.parent : null;
       const area = net.area(it.id);
       const areaHint = area && (!parent || net.area(parent) !== area) ? net.areaName(area) : null;
-      const sub = [net.address(it.id), it.loose ? "nicht verbunden" : areaHint, it.hidden ? `+${it.hidden}` : null].filter(Boolean).join(" · ");
+      const addr = merged ? (net.address(it.id) ?? "").replace(/\.(L[123]|N|\d+)$/, "") : net.address(it.id);
+      const sub = [addr, merged ? `${it.ids.length}-polig` : null, it.loose ? "nicht verbunden" : areaHint, it.hidden ? `+${it.hidden}` : null].filter(Boolean).join(" · ");
+      const title = merged ? net.name(it.id, this.p.hass).replace(/\s+(L[123]|Phase [ABC]|N|Kanal \d+)$/i, "") : net.name(it.id, this.p.hass);
       const kindIcon = n.feed_in ? MDI.solar : n.kind === "outlet" ? MDI.outlet : n.switch ? MDI.toggle : null;
       el = h("div", {
         ...base,
         class: `card node-card kind-${n.kind}${it.loose ? " loose-node" : ""}${sel?.type === "node" && sel.id === it.id ? " selected" : ""}${this.p.picking === it.id ? " picking" : ""}${n.meter ? "" : " unmetered"}`,
       },
         kindIcon ? h("span", { class: "kicon" }, icon(kindIcon, 16)) : null,
-        h("div", { class: "txt" }, h("div", { class: "title" }, net.name(it.id, this.p.hass)), h("div", { class: "sub" }, sub)),
-        n.switch ? (() => {
+        h("div", { class: "txt" }, h("div", { class: "title" }, title), h("div", { class: "sub" }, sub)),
+        n.switch && !merged ? (() => {
           const t = this.p.toggleButton(n);
           t.addEventListener("pointerdown", (e) => e.stopPropagation());
           this.live.push({ kind: "toggle", el: t, entity: n.switch });
@@ -491,7 +564,7 @@ export class FlowView {
     if (this.collapsed.has(key)) {
       this.collapsed.delete(key);
       let kids = [];
-      if (net.nodes.has(key)) kids = net.kids(key);
+      if (net.nodes.has(key)) kids = this.membersOf(key).flatMap((m) => net.kids(m));
       else if (key === "loose") kids = net.kids(null);
       else if (key.startsWith("cab:")) {
         const [, cab, parent] = key.split(":");
@@ -515,7 +588,7 @@ export class FlowView {
 
   focus(id) {
     const net = this.p.net;
-    for (const a of net.ancestors(id)) this.collapsed.delete(a);
+    for (const a of net.ancestors(id)) { this.collapsed.delete(a); this.collapsed.delete(this.mergedPrimary?.get(a)); }
     for (const k of [...this.collapsed]) if (k.startsWith("cab:")) {
       const [, cab, parent] = k.split(":");
       if ((parent === net.nodes.get(id)?.parent || [...net.ancestors(id)].includes(parent)) && net.cabinetOf(id) === cab) this.collapsed.delete(k);
@@ -524,7 +597,7 @@ export class FlowView {
     this.collapsed.delete(this.groupKey(root));
     this.saveCollapsed();
     this.render();
-    const card = this.cards.get(id);
+    const card = this.cards.get(id) ?? this.cards.get(this.mergedPrimary?.get(id));
     if (!card) return;
     const r = this.el.getBoundingClientRect();
     const x = parseFloat(card.style.left), y = parseFloat(card.style.top);

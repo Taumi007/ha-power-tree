@@ -28,8 +28,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--sn-accent);
 .empty { padding: 32px; color: var(--sn-sub); }
 
 header { display: flex; align-items: center; gap: 12px; height: var(--header-height, 56px); padding: 0 12px 0 8px; background: var(--app-header-background-color, var(--sn-card)); color: var(--app-header-text-color, var(--sn-text)); border-bottom: 1px solid var(--sn-div); flex-wrap: nowrap; }
-.menu-btn { display: none; }
-:host([narrow]) .menu-btn { display: inline-flex; }
+.icon-btn.menu-btn { display: none; }
+:host([narrow]) .icon-btn.menu-btn, :host([sidebar-hidden]) .icon-btn.menu-btn { display: inline-flex; }
 .brand { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 400; padding-left: 8px; }
 .brand .ico { color: var(--sn-accent); }
 .tabs { display: flex; align-self: stretch; margin-left: 12px; }

@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from homeassistant.components import frontend, panel_custom
-from homeassistant.components.http import StaticPathConfig
+from aiohttp import web
+from homeassistant.components.http import KEY_HASS, HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -27,6 +28,25 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 FRONTEND_DIR = Path(__file__).parent / "frontend"
+
+
+class FrontendView(HomeAssistantView):
+    """Panel-Dateien mit »no-cache«: der Browser fragt jedes Mal nach (ETag/Last-Modified) und holt
+    nach einem Deploy sofort die neue Fassung, auch ohne HA-Neustart (die Version im Pfad ändert
+    sich nur beim Start)."""
+
+    url = STATIC_URL + "/{version}/{filename:.+}"
+    name = "stromnetz:frontend"
+    requires_auth = False
+
+    async def get(self, request: web.Request, version: str, filename: str) -> web.StreamResponse:
+        root = FRONTEND_DIR.resolve()
+        path = (root / filename).resolve()
+        if root not in path.parents or path.suffix not in (".js", ".css", ".json"):
+            raise web.HTTPNotFound()
+        if not await request.app[KEY_HASS].async_add_executor_job(path.is_file):
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 @dataclass
@@ -89,7 +109,7 @@ async def _register_panel(hass: HomeAssistant) -> None:
 
         flags["version"] = await hass.async_add_executor_job(newest)
         flags["base"] = f"{STATIC_URL}/{flags['version']}"
-        await hass.http.async_register_static_paths([StaticPathConfig(flags["base"], str(FRONTEND_DIR), False)])
+        hass.http.register_view(FrontendView)
         flags["static"] = True
     if PANEL_URL in hass.data.get(frontend.DATA_PANELS, {}):
         return

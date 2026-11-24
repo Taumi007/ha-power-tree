@@ -55,6 +55,8 @@ class StromnetzPanel extends HTMLElement {
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
+    // Menüknopf wie in HA: nur bei schmalem Fenster oder dauerhaft ausgeblendeter Seitenleiste
+    this.toggleAttribute("sidebar-hidden", hass?.dockedSidebar === "always_hidden");
     if (first) this.load();
     else this.liveTick();
   }
