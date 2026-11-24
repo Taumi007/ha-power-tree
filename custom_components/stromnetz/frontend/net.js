@@ -1,5 +1,9 @@
 // Client-Sicht auf das Netz: Indizes, Vererbung, Namen und Live-Werte
+import { CATALOG_BY_KEY } from "./catalog.js";
 import { GRID, PHASES, friendly, num } from "./util.js";
+
+// Modellnamen aus dem Katalog; andere Einträge im Modellfeld wurden bisher als Name benutzt
+const CATALOG_MODELS = new Set([...CATALOG_BY_KEY.values()].flatMap((i) => [i.model, i.name]).filter(Boolean));
 
 export class Net {
   constructor(data, desc) {
@@ -126,6 +130,20 @@ export class Net {
     const meter = this.meterOf(id);
     if (meter) return friendly(hass, meter).replace(/ Leistung$/, "");
     return id;
+  }
+
+  // Name eines Hutschienengeräts: eigenes Feld, sonst erster Kanal ohne » Kanal n«/» L1«, sonst Modell/Typ
+  defaultModuleName(m, hass) {
+    const first = (this.moduleNodes.get(m.id) ?? [])[0];
+    const fromChannel = first ? this.name(first.id, hass).replace(/\s+(L[123]|N|Phase [ABC]|Kanal \d+)$/i, "") : "";
+    // Automatisch vergebene Kanalnamen (»Sicherung F17«, »FI FI1«) sind nur die Bezeichnung: dann Modell/Typ
+    const auto = !fromChannel || fromChannel === first.id || (m.label && (fromChannel === m.label || fromChannel.endsWith(` ${m.label}`)));
+    if (m.model && !CATALOG_MODELS.has(m.model)) return m.model;
+    return auto ? (m.model || "") : fromChannel;
+  }
+
+  moduleName(m, hass, typeLabel = "") {
+    return (m.name || this.defaultModuleName(m, hass) || typeLabel).replace(/^Sicherung\s+/i, "");
   }
 
   moduleTitle(m) {

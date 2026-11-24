@@ -100,11 +100,14 @@ main { flex: 1; min-height: 0; position: relative; }
 .module::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--stripe); }
 .module .mlabel { font-size: 13px; color: var(--sn-text); }
 .module .mname { flex: 1; min-height: 0; writing-mode: vertical-rl; transform: rotate(180deg); color: var(--sn-text); font-size: 12.5px; font-weight: 500; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.module.wide .mname { writing-mode: horizontal-tb; transform: none; text-align: center; white-space: normal; padding: 0 6px; font-size: 13px; display: flex; align-items: center; }
+.module.wide .mname { writing-mode: horizontal-tb; transform: none; text-align: center; white-space: normal; padding: 0 6px; font-size: 13px; display: flex; align-items: center; justify-content: center; align-self: stretch; }
+.module.wide .mname .mni { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; hyphens: auto; }
+.module .mrcd { font-size: 11px; color: var(--sn-sub); white-space: nowrap; }
 .module .mval { font-variant-numeric: tabular-nums; color: var(--sn-text); font-weight: 600; }
 .zone { position: absolute; border: 1px dashed color-mix(in srgb, var(--sn-accent) 45%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--sn-accent) 5%, transparent); }
 .zslot { font-size: 14px; }
-.mount { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0 6px; background: color-mix(in srgb, var(--sn-accent) 16%, var(--sn-raised)); border: 1px solid color-mix(in srgb, var(--sn-accent) 60%, transparent); border-radius: 4px; font-size: 11px; cursor: pointer; user-select: none; touch-action: none; overflow: hidden; white-space: nowrap; }
+.mount::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--stripe); }
+.mount { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 6px 0; background: color-mix(in srgb, var(--sn-accent) 16%, var(--sn-raised)); border: 1px solid color-mix(in srgb, var(--sn-accent) 60%, transparent); border-radius: 4px; font-size: 11px; cursor: pointer; user-select: none; touch-action: none; overflow: hidden; white-space: nowrap; }
 .mount .mhead { display: flex; gap: 6px; max-width: 100%; }
 .mount .mname { color: var(--sn-sub); overflow: hidden; text-overflow: ellipsis; }
 /* Werte je Kanal: gleich breite Abschnitte wie die Phasenbalken oben */

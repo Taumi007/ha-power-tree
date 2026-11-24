@@ -10,7 +10,7 @@ function moduleInfo(panel, m) {
   const nodes = net.moduleNodes.get(m.id) ?? [];
   const phases = net.phasesOfModule(m);
   const colors = phases.map((p) => panel.data.settings.colors[p] ?? "#7d8a96");
-  const name = (nodes.length === 1 ? net.name(nodes[0].id, panel.hass) : m.model || MODULE_TYPE_LABEL[m.type]).replace(/^Sicherung\s+/i, "");
+  const name = net.moduleName(m, panel.hass, MODULE_TYPE_LABEL[m.type]);
   const stripe = colors.length > 1
     ? `linear-gradient(90deg, ${colors.map((c, i) => `${c} ${(i * 100) / colors.length}% ${((i + 1) * 100) / colors.length}%`).join(", ")})`
     : colors[0] ?? "#9e9e9e";

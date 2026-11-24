@@ -229,8 +229,7 @@ export class CabinetView {
     const sel = this.p.selection;
     const selected = (sel?.type === "module" && sel.id === m.id) || (sel?.type === "node" && nodes.some((n) => n.id === sel.id));
     const width = (m.width || 1) * TE - 4;
-    const name = (nodes.length === 1 ? net.name(nodes[0].id, this.p.hass) : m.model || MODULE_TYPE_LABEL[m.type])
-      .replace(/^Sicherung\s+/i, "");
+    const name = net.moduleName(m, this.p.hass, MODULE_TYPE_LABEL[m.type]);
     const val = h("span", { class: "mval" });
     this.live.push({ el: val, get: () => {
       const vals = nodes.map((n) => net.value(n.id, this.p.hass)).filter((v) => v !== null);
@@ -239,11 +238,14 @@ export class CabinetView {
     // Mehrphasig mit Zählern: statt der Summe der Wert je Kanal, jeweils unter seinem Abschnitt
     const metered = nodes.filter((n) => net.meterOf(n.id));
     const chVals = metered.length > 1 ? h("span", { class: "mval chrow" }, ...nodes.map((n) => {
-      const ph = net.phase(n.id);
-      const v = h("span", { class: "chv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} });
+      const v = h("span", { class: "chv" });
       this.live.push({ el: v, get: () => net.value(n.id, this.p.hass) });
       return v;
     })) : null;
+    // FI: Nennstrom und Auslösestrom eine Zeile über den Werten; Werte nur, wenn ein Zähler dranhängt
+    const rcdInfo = m.type === "rcd" ? h("span", { class: "mrcd" }, m.rcd_ma ? `${m.rating ? `${m.rating} A · ` : ""}${m.rcd_ma} mA` : "FI") : null;
+    // ohne Zähler bleibt die Wertzeile beim FI leer, damit die Angaben immer eine Zeile darüber stehen
+    const bottom = chVals ?? (m.type === "rcd" && !metered.length ? h("span", { class: "mval" }, "\u00a0") : val);
     const rcd = m.rcd ? net.modules.get(m.rcd) : null;
     // Ein Schalter je Entity (ein 3-poliges Schütz hat oft nur einen)
     const switches = [...new Map(nodes.filter((n) => n.switch).map((n) => [n.switch, n])).values()];
@@ -258,9 +260,10 @@ export class CabinetView {
       title: [net.moduleTitle(m), m.model, phases.length ? phases.map((p) => PHASE_LABEL[p]).join("/") : null, rcd ? `über ${rcd.label}` : null].filter(Boolean).join(" · "),
     },
       h("span", { class: "mtop" }, h("b", { class: "mlabel" }, m.label || "?"), rating),
-      h("span", { class: "mname" }, name),
+      h("span", { class: "mname" }, width > 60 ? h("span", { class: "mni" }, name) : name),
       switches.length ? h("span", { class: "switches" }, ...switches.map((n) => this.switchBtn(n))) : null,
-      m.type === "rcd" ? h("span", { class: "mval muted" }, m.rcd_ma ? `${m.rating ? `${m.rating} A · ` : ""}${m.rcd_ma} mA` : "FI") : chVals ?? val);
+      rcdInfo,
+      bottom);
     el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));
     this.bindDrag(el, m);
     return el;
@@ -276,14 +279,18 @@ export class CabinetView {
     const under = [...new Set(targets.map((t) => t.module).filter(Boolean))].map((id) => net.modules.get(id)?.label).filter(Boolean);
     const title = [net.moduleTitle(m), m.model, `${m.mount === "top" ? "oben" : "unten"} an ${under.join(", ") || "–"}`,
       `${(m.meters ?? []).filter(Boolean).length}/${(m.meters ?? []).length} Zähler`].filter(Boolean).join(" · ");
-    const vals = (m.meters ?? []).map((e, i) => {
-      const ph = targets[i]?.node ? net.phase(targets[i].node) : null;
-      const v = h("span", { class: "chv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} });
+    const vals = (m.meters ?? []).map((e) => {
+      const v = h("span", { class: "chv" });
       this.live.push({ el: v, get: () => num(this.p.hass, e) });
       return v;
     });
+    // Phasenbalken wie bei den Hutschienengeräten: je Kanal die Phase des Pols darunter
+    const colors = targets.map((t) => (t.node ? net.phase(t.node) : null)).map((p) => (p ? this.p.data.settings.colors[p] ?? NEUTRAL : NEUTRAL));
+    const stripe = colors.length > 1
+      ? `linear-gradient(90deg, ${colors.map((c, i) => `${c} ${(i * 100) / colors.length}% ${((i + 1) * 100) / colors.length}%`).join(", ")})`
+      : colors[0] ?? NEUTRAL;
     const el = h("div", { class: `mount${selected ? " selected" : ""}${width > 60 ? " wide" : ""}`, title,
-      style: { left: `${48 + m.slot * TE}px`, top: `${this.zoneTop(m.row, m.mount)}px`, width: `${width}px`, height: `${ZONE}px` } },
+      style: { left: `${48 + m.slot * TE}px`, top: `${this.zoneTop(m.row, m.mount)}px`, width: `${width}px`, height: `${ZONE}px`, "--stripe": stripe } },
       h("span", { class: "mhead" }, h("b", { class: "mlabel" }, m.label || "?"), width > 90 ? h("span", { class: "mname" }, m.model ?? "") : null),
       h("span", { class: "mvals chrow" }, ...vals));
     el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));

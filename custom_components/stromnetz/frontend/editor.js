@@ -459,6 +459,8 @@ export class Editor {
       h("div", { class: "grid2" },
         this.text("Bezeichnung im Kasten", m, "label", { placeholder: "F12, K1, Q1 …" }),
         this.select("Typ", m, "type", Object.entries(MODULE_TYPE_LABEL))),
+      this.text("Name", m, "name", { placeholder: net.defaultModuleName(m, hass) || MODULE_TYPE_LABEL[m.type],
+        hint: "Steht in der Zeichnung. Leer: Name des ersten Kanals" }),
       isBreaker ? h("div", { class: "grid-cr" },
         this.segment("Charakteristik", m, "curve", [[null, "–"], ...CURVES.map((c) => [c, c])]),
         this.number("Nennstrom (A)", m, "rating", { min: 1, placeholder: "offen" })) : null,
@@ -530,6 +532,7 @@ export class Editor {
         return v.length ? v.reduce((a, b) => a + b, 0) : null;
       }),
       h("div", { class: "hint" }, "Kein eigener Knoten im Fluss: Jeder Kanal gibt seinen Zähler an das Gerät darunter weiter, bei mehrpoligen an den passenden Pol."),
+      this.text("Name", m, "name", { placeholder: m.model || "z. B. PV-Zuleitung" }),
       h("div", { class: "grid2" },
         this.text("Bezeichnung im Kasten", m, "label", { placeholder: "P1, Q1 …" }),
         this.select("Anbauort", m, "mount", [["top", "über der Reihe"], ["bottom", "unter der Reihe"]])),

@@ -91,7 +91,7 @@ def normalize(data: dict) -> dict:
         c.setdefault("notes", None)
     for m in d["modules"]:
         for f in ("row", "slot", "label", "model", "poles", "rating", "curve", "rcd", "rcd_ma", "notes", "device",
-                  "mount", "meters"):
+                  "mount", "meters", "name"):
             m.setdefault(f, None)
         m.setdefault("width", 1)
         m.setdefault("type", "breaker")
