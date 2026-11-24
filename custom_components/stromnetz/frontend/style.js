@@ -104,8 +104,12 @@ main { flex: 1; min-height: 0; position: relative; }
 .module .mval { font-variant-numeric: tabular-nums; color: var(--sn-text); font-weight: 600; }
 .zone { position: absolute; border: 1px dashed color-mix(in srgb, var(--sn-accent) 45%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--sn-accent) 5%, transparent); }
 .zslot { font-size: 14px; }
-.mount { position: absolute; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 6px; background: color-mix(in srgb, var(--sn-accent) 16%, var(--sn-raised)); border: 1px solid color-mix(in srgb, var(--sn-accent) 60%, transparent); border-radius: 4px; font-size: 11px; cursor: pointer; user-select: none; touch-action: none; overflow: hidden; white-space: nowrap; }
+.mount { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0 6px; background: color-mix(in srgb, var(--sn-accent) 16%, var(--sn-raised)); border: 1px solid color-mix(in srgb, var(--sn-accent) 60%, transparent); border-radius: 4px; font-size: 11px; cursor: pointer; user-select: none; touch-action: none; overflow: hidden; white-space: nowrap; }
+.mount .mhead { display: flex; gap: 6px; max-width: 100%; }
 .mount .mname { color: var(--sn-sub); overflow: hidden; text-overflow: ellipsis; }
+.mount .mvals { display: flex; gap: 8px; font-variant-numeric: tabular-nums; }
+.module .chvals { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.module .chv i { font-style: normal; opacity: .75; margin-right: 4px; }
 .mount.selected { border: 2px solid var(--sn-accent); }
 .mount.blocked { opacity: .5; outline: 2px solid var(--error-color, #db4437); }
 .mount-bar { position: absolute; height: 4px; padding: 0; border: 0; border-radius: 2px; background: var(--sn-accent); cursor: pointer; }

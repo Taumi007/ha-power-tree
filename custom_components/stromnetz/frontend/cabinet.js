@@ -104,8 +104,23 @@ export class CabinetView {
     return this.p.editing ? ROW_H_EDIT : ROW_H;
   }
 
+  // Reihen-Lage: im Bearbeitungsmodus alle Anbauzonen offen, sonst nur dort, wo ein Anbaugerät sitzt
+  computeLayout(cab) {
+    const edit = this.p.editing;
+    const has = (r, mount) => this.p.data.modules.some((m) => m.cabinet === cab.id && m.mount === mount && m.row === r && m.slot !== null);
+    const tops = [];
+    let y = 12;
+    for (let r = 0; r < cab.rows; r++) {
+      if (edit || has(r, "top")) y += ZONE + ZGAP;
+      tops.push(y);
+      y += MOD_H + (edit || has(r, "bottom") ? ZGAP + ZONE : 0) + (ROW_H - MOD_H);
+    }
+    this.rowTops = tops;
+    this.boardH = y - (ROW_H - MOD_H) + 24;
+  }
+
   rowTop(r) {
-    return r * this.rowH + 12 + (this.p.editing ? ZONE + ZGAP : 0);
+    return this.rowTops?.[r] ?? r * ROW_H + 12;
   }
 
   zoneTop(r, mount) {
@@ -150,8 +165,9 @@ export class CabinetView {
           (this.zoomLabel = h("button", { class: "zl", title: "Auf Breite einpassen", onclick: () => this.fitZoom() }, `${Math.round((this.zoom ?? 1) * 100)} %`)),
           h("button", { class: "icon-btn small", "aria-label": "Vergrößern", onclick: () => this.setZoom((this.zoom ?? 1) * 1.2) }, icon(MDI.plus, 16)))));
 
+    this.computeLayout(cab);
     const board = h("div", { class: `board${this.p.editing ? " editing" : ""}`,
-      style: { width: `${cab.width * TE + 72}px`, height: `${cab.rows * this.rowH + 24}px`, zoom: String(this.zoom ?? 1) } });
+      style: { width: `${cab.width * TE + 72}px`, height: `${this.boardH}px`, zoom: String(this.zoom ?? 1) } });
     for (let r = 0; r < cab.rows; r++) {
       board.append(h("div", { class: "rail", style: { top: `${this.rowTop(r) + MOD_H / 2 - 12}px`, width: `${cab.width * TE}px` } }));
       board.append(h("div", { class: "row-label", style: { top: `${this.rowTop(r) + MOD_H / 2 - 8}px` } }, `R${r + 1}`));
@@ -220,6 +236,15 @@ export class CabinetView {
       const vals = nodes.map((n) => net.value(n.id, this.p.hass)).filter((v) => v !== null);
       return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     } });
+    // Mehrphasig mit Zählern: zusätzlich der Wert je Kanal
+    const metered = nodes.filter((n) => net.meterOf(n.id));
+    const chVals = metered.length > 1 ? h("span", { class: "chvals" }, ...metered.map((n) => {
+      const ph = net.phase(n.id);
+      const v = h("span", {});
+      this.live.push({ el: v, get: () => net.value(n.id, this.p.hass) });
+      return h("span", { class: "chv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} },
+        h("i", {}, ph ? PHASE_LABEL[ph] : String(n.channel ?? "")), v);
+    })) : null;
     const rcd = m.rcd ? net.modules.get(m.rcd) : null;
     // Ein Schalter je Entity (ein 3-poliges Schütz hat oft nur einen)
     const switches = [...new Map(nodes.filter((n) => n.switch).map((n) => [n.switch, n])).values()];
@@ -236,13 +261,14 @@ export class CabinetView {
       h("span", { class: "mtop" }, h("b", { class: "mlabel" }, m.label || "?"), rating),
       h("span", { class: "mname" }, name),
       switches.length ? h("span", { class: "switches" }, ...switches.map((n) => this.switchBtn(n))) : null,
+      chVals,
       m.type === "rcd" ? h("span", { class: "mval muted" }, m.rcd_ma ? `${m.rating ? `${m.rating} A · ` : ""}${m.rcd_ma} mA` : "FI") : val);
     el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));
     this.bindDrag(el, m);
     return el;
   }
 
-  // Anbaugerät: im Bearbeitungsmodus als Kästchen in seiner Zone, sonst als schmale Leiste am Gerät
+  // Anbaugerät: Kästchen in seiner Zone mit dem Wert je Kanal (in der Phasenfarbe des Pols darunter)
   mountEl(m) {
     const net = this.p.net;
     const sel = this.p.selection;
@@ -252,25 +278,18 @@ export class CabinetView {
     const under = [...new Set(targets.map((t) => t.module).filter(Boolean))].map((id) => net.modules.get(id)?.label).filter(Boolean);
     const title = [net.moduleTitle(m), m.model, `${m.mount === "top" ? "oben" : "unten"} an ${under.join(", ") || "–"}`,
       `${(m.meters ?? []).filter(Boolean).length}/${(m.meters ?? []).length} Zähler`].filter(Boolean).join(" · ");
-    const left = `${48 + m.slot * TE}px`;
-    let el;
-    if (this.p.editing) {
-      const val = h("span", { class: "mval" });
-      this.live.push({ el: val, get: () => {
-        const vals = (m.meters ?? []).map((e) => num(this.p.hass, e)).filter((v) => v !== null);
-        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
-      } });
-      el = h("div", { class: `mount${selected ? " selected" : ""}${width > 60 ? " wide" : ""}`, title,
-        style: { left, top: `${this.zoneTop(m.row, m.mount)}px`, width: `${width}px`, height: `${ZONE}px` } },
-        h("b", { class: "mlabel" }, m.label || "?"), width > 60 ? h("span", { class: "mname" }, m.model ?? "") : null, val);
-      this.bindDrag(el, m);
-    } else {
-      const top = m.mount === "top" ? this.rowTop(m.row) - 7 : this.rowTop(m.row) + MOD_H + 3;
-      el = h("button", { class: `mount-bar${selected ? " selected" : ""}`, title, "aria-label": title,
-        style: { left, top: `${top}px`, width: `${width}px` },
-        onclick: (e) => { e.stopPropagation(); this.p.select({ type: "module", id: m.id }); } });
-    }
+    const vals = (m.meters ?? []).map((e, i) => {
+      const ph = targets[i]?.node ? net.phase(targets[i].node) : null;
+      const v = h("span", { class: "mv", style: ph ? { color: this.p.data.settings.colors[ph] ?? "inherit" } : {} });
+      this.live.push({ el: v, get: () => num(this.p.hass, e) });
+      return v;
+    });
+    const el = h("div", { class: `mount${selected ? " selected" : ""}${width > 60 ? " wide" : ""}`, title,
+      style: { left: `${48 + m.slot * TE}px`, top: `${this.zoneTop(m.row, m.mount)}px`, width: `${width}px`, height: `${ZONE}px` } },
+      h("span", { class: "mhead" }, h("b", { class: "mlabel" }, m.label || "?"), width > 90 ? h("span", { class: "mname" }, m.model ?? "") : null),
+      h("span", { class: "mvals" }, ...vals));
     el.addEventListener("contextmenu", (e) => this.p.contextModule(e, m.id));
+    this.bindDrag(el, m);
     return el;
   }
 
